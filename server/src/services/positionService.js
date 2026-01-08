@@ -1,5 +1,5 @@
-// Импортируем все модели из models/index.js
-const db = require("../db/models"); // или "../models" в зависимости от структуры
+
+const db = require("../db/models");
 const { Op } = require("sequelize");
 
 class PositionService {
@@ -12,7 +12,6 @@ class PositionService {
       where.name = { [Op.iLike]: `%${search}%` };
     }
 
-    // Используем db.position (с маленькой буквы)
     const { count, rows } = await db.position.findAndCountAll({
       where,
       limit: parseInt(limit),
@@ -31,7 +30,7 @@ class PositionService {
     };
   }
 
-  // Получить должность по ID
+
   async getPositionById(id) {
     const position = await db.position.findByPk(id);
     if (!position) {
@@ -42,7 +41,6 @@ class PositionService {
 
   // Создать должность
   async createPosition(positionData) {
-    // Проверяем, существует ли уже такая должность
     const existingPosition = await db.position.findOne({
       where: { name: positionData.name },
     });
