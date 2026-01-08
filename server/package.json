@@ -18,5 +18,8 @@
     "sequelize": "^6.37.7",
     "sequelize-cli": "^6.6.5",
     "xlsx": "^0.18.5"
+  },
+  "dependencies": {
+    "express-validator": "^7.3.1"
   }
 }

@@ -6,12 +6,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Проверка работы
-app.get("/", (req, res) => {
-  res.json({ message: "Employee Tracker API" });
-});
+// Подключаем роуты
+app.use("/api", require("./routes"));
 
+// Health check
 app.get("/health", async (req, res) => {
   try {
     await sequelize.authenticate();
@@ -19,6 +19,17 @@ app.get("/health", async (req, res) => {
   } catch (err) {
     res.status(500).json({ status: "ERROR", error: err.message });
   }
+});
+
+// 404 обработчик
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error("Error:", err);
+  res.status(500).json({ error: "Internal server error" });
 });
 
 // Запуск
