@@ -3,6 +3,7 @@ const common = require("./commonValidator");
 const position = require("./positionValidator");
 const project = require("./projectValidator");
 const department = require("./departmentValidator");
+const employee = require("./employeeValidator");
 
 module.exports = {
   validate,
@@ -10,4 +11,5 @@ module.exports = {
   position,
   project,
   department,
+  employee
 };

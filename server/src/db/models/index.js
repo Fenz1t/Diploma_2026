@@ -5,11 +5,9 @@ const path = require("path");
 const Sequelize = require("sequelize");
 const basename = path.basename(__filename);
 
-// Импортируем ваш существующий sequelize из db/index.js
 const { sequelize } = require("../index");
 const db = {};
 
-// Загружаем все модели из текущей папки
 fs.readdirSync(__dirname)
   .filter((file) => {
     return (

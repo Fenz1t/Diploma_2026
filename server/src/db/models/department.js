@@ -13,6 +13,11 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: "parent_id",
         as: "children",
       });
+
+      Department.hasMany(models.Employee, {
+        foreignKey: "department_id",
+        as: "employees",
+      });
     }
   }
 

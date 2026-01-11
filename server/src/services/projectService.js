@@ -38,7 +38,7 @@ class ProjectService {
 
   // Получить проект по ID
   async getProjectById(id) {
-    const project = await db.project.findByPk(id);
+    const project = await db.Project.findByPk(id);
     if (!project) {
       throw new Error("Проект не найден");
     }
@@ -48,7 +48,7 @@ class ProjectService {
   // Создать проект
   async createProject(projectData) {
     // Проверяем уникальность названия
-    const existingProject = await db.project.findOne({
+    const existingProject = await db.Project.findOne({
       where: { name: projectData.name },
     });
 
@@ -56,7 +56,7 @@ class ProjectService {
       throw new Error("Проект с таким названием уже существует");
     }
 
-    return await db.project.create(projectData);
+    return await db.Project.create(projectData);
   }
 
   // Обновить проект
@@ -99,7 +99,7 @@ class ProjectService {
 
   // Получить статистику по проектам
   async getProjectStatistics() {
-    const statistics = await db.project.findAll({
+    const statistics = await db.Project.findAll({
       attributes: [
         "status",
         [db.sequelize.fn("COUNT", db.sequelize.col("id")), "count"],
@@ -108,7 +108,7 @@ class ProjectService {
       raw: true,
     });
 
-    const total = await db.project.count();
+    const total = await db.Project.count();
 
     return {
       total,
@@ -121,7 +121,7 @@ class ProjectService {
 
   // Получить активные проекты (в работе)
   async getActiveProjects() {
-    return await db.project.findAll({
+    return await db.Project.findAll({
       where: {
         status: "in_progress",
       },

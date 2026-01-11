@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const path = require('path');
 const { sequelize } = require("./db");
 
 const app = express();
@@ -7,7 +8,8 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
+//статика для фотографий сотрудников
+app.use('/uploads', express.static(path.join(__dirname, './uploads')));
 // Подключаем роуты
 app.use("/api", require("./routes"));
 

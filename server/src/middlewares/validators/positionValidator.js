@@ -12,7 +12,7 @@ const createPositionValidator = [
     .matches(/^[a-zA-Zа-яА-ЯёЁ\s\-]+$/)
     .withMessage("Название может содержать только буквы, пробелы и дефисы")
     .custom(async (value) => {
-      const existingPosition = await db.position.findOne({
+      const existingPosition = await db.Position.findOne({
         where: { name: value },
       });
       if (existingPosition) {
@@ -34,7 +34,7 @@ const updatePositionValidator = [
     .custom(async (value, { req }) => {
       if (!value) return true;
 
-      const existingPosition = await Position.findOne({
+      const existingPosition = await db.Position.findOne({
         where: {
           name: value,
           id: { $not: req.params.id },

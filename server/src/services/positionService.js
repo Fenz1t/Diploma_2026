@@ -12,7 +12,7 @@ class PositionService {
       where.name = { [Op.iLike]: `%${search}%` };
     }
 
-    const { count, rows } = await db.position.findAndCountAll({
+    const { count, rows } = await db.Position.findAndCountAll({
       where,
       limit: parseInt(limit),
       offset: parseInt(offset),
@@ -32,7 +32,7 @@ class PositionService {
 
 
   async getPositionById(id) {
-    const position = await db.position.findByPk(id);
+    const position = await db.Position.findByPk(id);
     if (!position) {
       throw new Error("Должность не найдена");
     }
@@ -41,7 +41,7 @@ class PositionService {
 
   // Создать должность
   async createPosition(positionData) {
-    const existingPosition = await db.position.findOne({
+    const existingPosition = await db.Position.findOne({
       where: { name: positionData.name },
     });
 
@@ -58,7 +58,7 @@ class PositionService {
 
     // Проверяем уникальность названия (если меняется)
     if (positionData.name && positionData.name !== position.name) {
-      const existingPosition = await db.position.findOne({
+      const existingPosition = await db.Position.findOne({
         where: { name: positionData.name },
       });
 
@@ -88,7 +88,7 @@ class PositionService {
 
   // Получить всех сотрудников с этой должностью
   async getEmployeesByPosition(positionId) {
-    const position = await db.position.findByPk(positionId);
+    const position = await db.Position.findByPk(positionId);
 
     if (!position) {
       throw new Error("Должность не найдена");

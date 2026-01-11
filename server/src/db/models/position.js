@@ -8,7 +8,10 @@ module.exports = (sequelize, DataTypes) => {
      * The `models/index` file will call this method automatically.
      */
     static associate(models) {
-      // define association here
+      Position.hasMany(models.Employee, {
+        foreignKey: "position_id",
+        as: "employees",
+      });
     }
   }
   Position.init(
@@ -17,7 +20,7 @@ module.exports = (sequelize, DataTypes) => {
     },
     {
       sequelize,
-      modelName: "position",
+      modelName: "Position",
       tableName: "positions",
       timestamps: true,
       createdAt: "created_at",
