@@ -14,17 +14,15 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: "position_id",
         as: "position",
       });
+      Employee.hasMany(models.WorkloadEntry, {
+        foreignKey: "employee_id",
+        as: "workloads",
+      });
 
-      // Связи для будущих таблиц (пока закомментированы)
-      // Employee.hasMany(models.WorkloadEntry, {
-      //   foreignKey: 'employee_id',
-      //   as: 'workloads'
-      // });
-
-      // Employee.hasMany(models.KPIMetric, {
-      //   foreignKey: 'employee_id',
-      //   as: 'kpis'
-      // });
+      Employee.hasMany(models.KPIMetric, {
+        foreignKey: "employee_id",
+        as: "kpis",
+      });
     }
   }
 

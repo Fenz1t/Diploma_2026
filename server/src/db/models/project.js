@@ -8,7 +8,11 @@ module.exports = (sequelize, DataTypes) => {
      * The `models/index` file will call this method automatically.
      */
     static associate(models) {
-      // define association here
+      // Связь с загрузкой сотрудников
+      Project.hasMany(models.WorkloadEntry, {
+        foreignKey: "project_id",
+        as: "workloads",
+      });
     }
   }
   Project.init(
