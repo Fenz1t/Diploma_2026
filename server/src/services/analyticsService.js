@@ -123,7 +123,7 @@ class AnalyticsService {
           avg_workload: Math.round(avgWorkload),
           avg_efficiency: Math.round(deptEfficiency * 10) / 10,
         };
-      })
+      }),
     );
 
     return stats.sort((a, b) => b.avg_efficiency - a.avg_efficiency);
@@ -210,9 +210,9 @@ class AnalyticsService {
           db.sequelize.fn("SUM", db.sequelize.col("tasks_overdue")),
           "total_overdue",
         ],
-        [db.sequelize.col("project.name"), "project_name"], 
+        [db.sequelize.col("project.name"), "project_name"],
       ],
-      group: ["WorkloadEntry.project_id", "project.name"], 
+      group: ["WorkloadEntry.project_id", "project.name"],
       include: [
         {
           model: db.Project,
@@ -400,10 +400,27 @@ class AnalyticsService {
         tasks_overdue: p.overdue,
       })),
 
-      kpi_history: kpiHistory.map((k) => ({
-        week: k.period.toISOString().split("T")[0],
-        value: k.metric_value,
-      })),
+      kpi_history: kpiHistory.map((k) => {
+        // Безопасное преобразование даты
+        let weekFormatted = "—";
+        if (k.period) {
+          try {
+            const date =
+              k.period instanceof Date ? k.period : new Date(k.period);
+            if (!isNaN(date.getTime())) {
+              weekFormatted = date.toISOString().split("T")[0];
+            }
+          } catch (e) {
+            // Если ошибка - оставляем как есть
+            weekFormatted = String(k.period).split("T")[0] || "—";
+          }
+        }
+
+        return {
+          week: weekFormatted,
+          value: k.metric_value,
+        };
+      }),
 
       recommendations: this.generateRecommendations(current, previous),
     };
@@ -418,13 +435,13 @@ class AnalyticsService {
 
     if (current.efficiency < 70) {
       recs.push(
-        "Эффективность ниже среднего. Рассмотрите дополнительные ресурсы."
+        "Эффективность ниже среднего. Рассмотрите дополнительные ресурсы.",
       );
     }
 
     if (current.overdue > 5) {
       recs.push(
-        "Много просроченных задач. Приоритезируйте завершение текущих."
+        "Много просроченных задач. Приоритезируйте завершение текущих.",
       );
     }
 
@@ -492,13 +509,146 @@ class AnalyticsService {
         ],
         {
           updateOnDuplicate: ["metric_value", "updated_at"],
-        }
+        },
       );
     }
 
     console.log(
-      `KPI вычислены и сохранены для ${employees.length} сотрудников`
+      `KPI вычислены и сохранены для ${employees.length} сотрудников`,
     );
+  }
+
+  async calculateWorkloadFromTasks() {
+    try {
+      const currentWeek = this.getCurrentWeekStart();
+
+      // 1. Получаем всех активных сотрудников
+      const employees = await db.Employee.findAll({
+        where: { is_active: true },
+        attributes: ["id", "full_name"],
+      });
+
+      console.log(
+        `🔄 Вычисление workload для ${employees.length} сотрудников...`,
+      );
+
+      let updatedRecords = 0;
+
+      // 2. Для каждого сотрудника вычисляем нагрузку
+      for (const employee of employees) {
+        const workloads = await db.WorkloadEntry.findAll({
+          where: {
+            employee_id: employee.id,
+            week_start_date: currentWeek,
+          },
+          include: [
+            {
+              model: db.Project,
+              as: "project",
+              attributes: ["id", "name"],
+            },
+          ],
+        });
+
+        if (workloads.length === 0) continue;
+
+        // 3. Считаем общее количество задач сотрудника за неделю
+        let totalEmployeeTasks = 0;
+        workloads.forEach((w) => {
+          const tasksInEntry =
+            (w.tasks_completed || 0) + (w.tasks_overdue || 0);
+          totalEmployeeTasks += tasksInEntry;
+        });
+
+        // 4. Если задач нет - устанавливаем 0 и пропускаем
+        if (totalEmployeeTasks === 0) {
+          for (const w of workloads) {
+            if (w.workload_percent !== 0) {
+              w.workload_percent = 0;
+              await w.save();
+              updatedRecords++;
+            }
+          }
+          continue;
+        }
+
+        // 5. Вычисляем процент для каждой записи
+        for (const workload of workloads) {
+          const tasksInThisEntry =
+            (workload.tasks_completed || 0) + (workload.tasks_overdue || 0);
+
+          // Формула: задачи в этом проекте / общие задачи сотрудника * 100
+          const calculatedPercent = Math.round(
+            (tasksInThisEntry / totalEmployeeTasks) * 100,
+          );
+
+          // Ограничиваем 0-100%
+          const finalPercent = Math.max(0, Math.min(100, calculatedPercent));
+
+          // Обновляем если значение изменилось
+          if (workload.workload_percent !== finalPercent) {
+            workload.workload_percent = finalPercent;
+            await workload.save();
+            updatedRecords++;
+          }
+        }
+      }
+
+      console.log(
+        `✅ Workload percentages обновлены: ${updatedRecords} записей`,
+      );
+
+      // 6. Автоматически пересчитываем KPI с новыми значениями
+      await this.calculateAndStoreKPIs();
+
+      return {
+        success: true,
+        updated_records: updatedRecords,
+        week: currentWeek.toISOString().split("T")[0],
+      };
+    } catch (error) {
+      console.error("❌ Ошибка вычисления workload:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Упрощенная версия для одного сотрудника (для тестов)
+   */
+  async calculateEmployeeWorkload(employeeId) {
+    const currentWeek = this.getCurrentWeekStart();
+
+    const workloads = await db.WorkloadEntry.findAll({
+      where: {
+        employee_id: employeeId,
+        week_start_date: currentWeek,
+      },
+    });
+
+    let totalTasks = 0;
+    workloads.forEach((w) => {
+      totalTasks += (w.tasks_completed || 0) + (w.tasks_overdue || 0);
+    });
+
+    if (totalTasks === 0) {
+      // Если нет задач - устанавливаем 0
+      for (const w of workloads) {
+        w.workload_percent = 0;
+        await w.save();
+      }
+      return 0;
+    }
+
+    // Обновляем каждую запись
+    for (const workload of workloads) {
+      const tasksInEntry =
+        (workload.tasks_completed || 0) + (workload.tasks_overdue || 0);
+      const percent = Math.round((tasksInEntry / totalTasks) * 100);
+      workload.workload_percent = percent;
+      await workload.save();
+    }
+
+    return totalTasks;
   }
 }
 

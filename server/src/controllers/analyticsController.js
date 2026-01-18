@@ -5,13 +5,14 @@ class AnalyticsController {
 
   async getDashboardData(req, res) {
     try {
+      await analyticsService.calculateWorkloadFromTasks();
       const [overall, departments, topPerformers, problems] = await Promise.all(
         [
           analyticsService.getOverallStats(),
           analyticsService.getDepartmentStats(),
           analyticsService.getTopPerformers(),
           analyticsService.getProblemAreas(),
-        ]
+        ],
       );
 
       res.json({
