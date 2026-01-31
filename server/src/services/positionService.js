@@ -1,4 +1,3 @@
-
 const db = require("../db/models");
 const { Op } = require("sequelize");
 
@@ -30,7 +29,6 @@ class PositionService {
     };
   }
 
-
   async getPositionById(id) {
     const position = await db.Position.findByPk(id);
     if (!position) {
@@ -49,7 +47,7 @@ class PositionService {
       throw new Error("Должность с таким названием уже существует");
     }
 
-    return await db.position.create(positionData);
+    return await db.Position.create(positionData);
   }
 
   // Обновить должность
@@ -74,28 +72,41 @@ class PositionService {
   async deletePosition(id) {
     const position = await this.getPositionById(id);
 
-    // Временно закомментируем проверку на сотрудников
-    // const employeeCount = await position.countEmployees();
-    // if (employeeCount > 0) {
-    //   throw new Error(
-    //     "Нельзя удалить должность, к которой привязаны сотрудники"
-    //   );
-    // }
+    const employeeCount = await position.countEmployees();
+    if (employeeCount > 0) {
+      throw new Error(
+        "Нельзя удалить должность, к которой привязаны сотрудники",
+      );
+    }
 
     await position.destroy();
     return { message: "Должность успешно удалена" };
   }
 
   // Получить всех сотрудников с этой должностью
+  // Получить всех сотрудников с этой должностью
   async getEmployeesByPosition(positionId) {
-    const position = await db.Position.findByPk(positionId);
+    const position = await db.Position.findByPk(positionId, {
+      include: [
+        {
+          model: db.Employee,
+          as: "employees", // Убедитесь, что это соответствует вашему алиасу в модели
+          include: [
+            {
+              model: db.Department,
+              as: "department", // Включить информацию о департаменте, если нужно
+            },
+          ],
+          attributes: { exclude: ["password"] }, // Исключить пароль, если есть
+        },
+      ],
+    });
 
     if (!position) {
       throw new Error("Должность не найдена");
     }
 
-    // Временно возвращаем пустой массив
-    return [];
+    return position.employees || [];
   }
 }
 

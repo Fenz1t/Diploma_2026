@@ -23,7 +23,6 @@ class PositionController {
       });
     }
   }
-
   // Получить должность по ID
   async getById(req, res) {
     try {
@@ -42,7 +41,6 @@ class PositionController {
       });
     }
   }
-
   // Создать должность
   async create(req, res) {
     try {
@@ -62,7 +60,6 @@ class PositionController {
       });
     }
   }
-
   // Обновить должность
   async update(req, res) {
     try {
@@ -89,7 +86,6 @@ class PositionController {
       });
     }
   }
-
   // Удалить должность
   async delete(req, res) {
     try {
@@ -113,7 +109,6 @@ class PositionController {
       });
     }
   }
-
   // Получить сотрудников с этой должностью
   async getEmployees(req, res) {
     try {

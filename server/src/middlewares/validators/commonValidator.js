@@ -7,7 +7,6 @@ const idValidator = [
     .toInt(),
 ];
 
-//(скорее всего меняться будет)
 const sortValidator = [
   query("sortBy")
     .optional()

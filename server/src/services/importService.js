@@ -12,25 +12,19 @@ class ImportService {
   async importFromFile(filePath, fileType, importType = "kanban") {
     try {
       console.log(`🔄 Импорт ${fileType} файла: ${filePath}`);
-
       // 1. Парсинг файла
       const data = await this.parseFile(filePath, fileType);
-
       // 2. Валидация данных
       const validatedData = this.validateData(data, importType);
-
       // 3. Импорт в БД
       const importResult = await this.importToDatabase(
         validatedData,
         importType,
       );
-
       // 4. Вычисляем workload_percent
       await analyticsService.calculateWorkloadFromTasks();
-
       // 5. Удаляем временный файл
       fs.unlinkSync(filePath);
-
       return {
         success: true,
         message: "Импорт успешно завершен",
@@ -45,8 +39,7 @@ class ImportService {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
       }
-
-      console.error("❌ Ошибка импорта:", error);
+      console.error("Ошибка импорта:", error);
       throw error;
     }
   }

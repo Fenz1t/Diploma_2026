@@ -1,12 +1,10 @@
 const departmentService = require('../services/departmentService');
-
 class DepartmentController {
   // Получить все отделы
   async getAll(req, res) {
     try {
       const { search = '' } = req.query;
-      const departments = await departmentService.getAllDepartments(search);
-      
+      const departments = await departmentService.getAllDepartments(search); 
       res.json({
         success: true,
         data: departments
@@ -18,7 +16,6 @@ class DepartmentController {
       });
     }
   }
-
   // Получить отдел по ID
   async getById(req, res) {
     try {
@@ -37,7 +34,6 @@ class DepartmentController {
       });
     }
   }
-
   // Создать отдел
   async create(req, res) {
     try {
@@ -57,7 +53,6 @@ class DepartmentController {
       });
     }
   }
-
   // Обновить отдел
   async update(req, res) {
     try {
@@ -80,7 +75,6 @@ class DepartmentController {
       });
     }
   }
-
   // Удалить отдел
   async delete(req, res) {
     try {
@@ -100,7 +94,6 @@ class DepartmentController {
       });
     }
   }
-
   // Получить иерархию отделов
   async getHierarchy(req, res) {
     try {
@@ -117,7 +110,6 @@ class DepartmentController {
       });
     }
   }
-
   // Получить отделы для выпадающего списка
   async getForSelect(req, res) {
     try {

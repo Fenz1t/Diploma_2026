@@ -80,19 +80,6 @@ class ProjectService {
   // Удалить проект
   async deleteProject(id) {
     const project = await this.getProjectById(id);
-
-    // Проверяем, есть ли связанные задачи (когда будет модель Task)
-    /*
-    const Task = require('../models/task');
-    const taskCount = await Task.count({
-      where: { project_id: id }
-    });
-    
-    if (taskCount > 0) {
-      throw new Error("Нельзя удалить проект, к которому привязаны задачи");
-    }
-    */
-
     await project.destroy();
     return { message: "Проект успешно удален" };
   }

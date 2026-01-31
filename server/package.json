@@ -7,7 +7,7 @@
     "db:reset": "npx sequelize-cli db:migrate:undo:all && npm run db:migrate"
   },
   "devDependencies": {
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "csv-parser": "^3.2.0",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",

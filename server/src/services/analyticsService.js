@@ -19,9 +19,7 @@ class AnalyticsService {
     previous.setDate(previous.getDate() - 7);
     return previous;
   }
-
   // ==================== ДЛЯ ДАШБОРДА ====================
-
   async getOverallStats() {
     const currentWeek = this.getCurrentWeekStart();
 

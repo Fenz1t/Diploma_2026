@@ -11,7 +11,6 @@ module.exports = (sequelize, DataTypes) => {
       });
     }
   }
-
   KPIMetric.init(
     {
       id: {

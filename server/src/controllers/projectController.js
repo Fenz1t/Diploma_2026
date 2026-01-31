@@ -24,7 +24,6 @@ class ProjectController {
       });
     }
   }
-
   // Получить проект по ID
   async getById(req, res) {
     try {
@@ -43,7 +42,6 @@ class ProjectController {
       });
     }
   }
-
   // Создать проект
   async create(req, res) {
     try {
@@ -63,7 +61,6 @@ class ProjectController {
       });
     }
   }
-
   // Обновить проект
   async update(req, res) {
     try {
@@ -90,7 +87,6 @@ class ProjectController {
       });
     }
   }
-
   // Удалить проект
   async delete(req, res) {
     try {
@@ -114,7 +110,6 @@ class ProjectController {
       });
     }
   }
-
   // Получить статистику
   async getStatistics(req, res) {
     try {
@@ -131,7 +126,6 @@ class ProjectController {
       });
     }
   }
-
   // Получить активные проекты
   async getActive(req, res) {
     try {
@@ -148,7 +142,6 @@ class ProjectController {
       });
     }
   }
-
   // Обновить статус проекта
   async updateStatus(req, res) {
     try {
@@ -161,9 +154,7 @@ class ProjectController {
           error: "Статус обязателен",
         });
       }
-
       const project = await projectService.updateProjectStatus(id, status);
-
       res.json({
         success: true,
         data: project,

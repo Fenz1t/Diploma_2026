@@ -1,6 +1,5 @@
 "use strict";
 const { Model } = require("sequelize");
-
 module.exports = (sequelize, DataTypes) => {
   class Department extends Model {
     static associate(models) {
@@ -8,19 +7,16 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: "parent_id",
         as: "parent",
       });
-
       Department.hasMany(models.Department, {
         foreignKey: "parent_id",
         as: "children",
       });
-
       Department.hasMany(models.Employee, {
         foreignKey: "department_id",
         as: "employees",
       });
     }
   }
-
   Department.init(
     {
       id: {
@@ -49,8 +45,7 @@ module.exports = (sequelize, DataTypes) => {
       createdAt: "created_at",
       updatedAt: "updated_at",
       underscored: true,
-    }
+    },
   );
-
   return Department;
 };
