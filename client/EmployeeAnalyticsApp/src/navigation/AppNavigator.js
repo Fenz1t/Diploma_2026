@@ -9,6 +9,9 @@ import DashboardScreen from "../screens/Dashboard/DashboardScreen";
 // Экран должностей
 import PositionsScreen from "../screens/Positions/PositionsScreen";
 import PositionFormScreen from "../screens/Positions/PositionFormScreen";
+// Проекты
+import ProjectsScreen from "../screens/Projects/ProjectsScreen";
+import ProjectFormScreen from "../screens/Projects/ProjectFormScreen";
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -23,6 +26,19 @@ const PositionsStack = () => (
       options={{
         headerShown: true,
         title: "Должность",
+      }}
+    />
+  </Stack.Navigator>
+);
+const ProjectsStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name="ProjectsList" component={ProjectsScreen} />
+    <Stack.Screen
+      name="ProjectForm"
+      component={ProjectFormScreen}
+      options={{
+        headerShown: true,
+        title: "Проект",
       }}
     />
   </Stack.Navigator>
@@ -65,6 +81,20 @@ const MainTabs = () => {
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons
               name="account-tie"
+              color={color}
+              size={size}
+            />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Projects"
+        component={ProjectsStack}
+        options={{
+          tabBarLabel: "Проекты",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons
+              name="folder-multiple"
               color={color}
               size={size}
             />

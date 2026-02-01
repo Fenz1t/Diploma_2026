@@ -18,7 +18,7 @@ class ProjectService {
       where.status = status;
     }
 
-    const { count, rows } = await db.project.findAndCountAll({
+    const { count, rows } = await db.Project.findAndCountAll({
       where,
       limit: parseInt(limit),
       offset: parseInt(offset),
@@ -65,7 +65,7 @@ class ProjectService {
 
     // Проверяем уникальность названия (если меняется)
     if (projectData.name && projectData.name !== project.name) {
-      const existingProject = await db.project.findOne({
+      const existingProject = await db.Project.findOne({
         where: { name: projectData.name },
       });
 
