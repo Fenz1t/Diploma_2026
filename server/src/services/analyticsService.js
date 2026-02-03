@@ -2,651 +2,442 @@ const db = require("../db/models");
 const { Op } = require("sequelize");
 
 class AnalyticsService {
-  // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+  /* ===================== HELPERS ===================== */
 
-  getCurrentWeekStart() {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(now.setDate(diff));
-    monday.setHours(0, 0, 0, 0);
-    return monday;
+  async getLatestWeek() {
+    const row = await db.WorkloadEntry.findOne({
+      attributes: [
+        [db.sequelize.fn("MAX", db.sequelize.col("week_start_date")), "week"],
+      ],
+      raw: true,
+    });
+
+    if (!row?.week) {
+      throw new Error("Нет загруженных данных");
+    }
+
+    return row.week;
   }
 
-  getPreviousWeekStart() {
-    const current = this.getCurrentWeekStart();
-    const previous = new Date(current);
-    previous.setDate(previous.getDate() - 7);
-    return previous;
+  calcFromWorkloads(workloads) {
+    let completed = 0;
+    let overdue = 0;
+    let workloadSum = 0;
+
+    for (const w of workloads) {
+      completed += Number(w.tasks_completed || 0);
+      overdue += Number(w.tasks_overdue || 0);
+      workloadSum += Number(w.workload_percent || 0);
+    }
+
+    const totalTasks = completed + overdue;
+    const avgWorkload = workloads.length ? workloadSum / workloads.length : 0;
+    const efficiency = totalTasks > 0 ? (completed / totalTasks) * 100 : 0;
+
+    return { completed, overdue, totalTasks, avgWorkload, efficiency };
   }
-  // ==================== ДЛЯ ДАШБОРДА ====================
+
+  /* ===================== CALLED IN /dashboard ===================== */
+
+  // Чтобы /dashboard не падал. Позже можешь заменить на реальный расчет из tasks.
+  async calculateWorkloadFromTasks() {
+    return true;
+  }
+
+  /* ===================== OVERALL ===================== */
+
   async getOverallStats() {
-    const currentWeek = this.getCurrentWeekStart();
+    const week = await this.getLatestWeek();
+
+    const workloads = await db.WorkloadEntry.findAll({
+      where: { week_start_date: week },
+      raw: true,
+    });
+
+    const m = this.calcFromWorkloads(workloads);
 
     const totalEmployees = await db.Employee.count({
       where: { is_active: true },
     });
 
-    const activeProjects = await db.Project.count({
-      where: { status: "active" },
-    });
-
-    const workloads = await db.WorkloadEntry.findAll({
-      where: { week_start_date: currentWeek },
-      attributes: ["workload_percent", "tasks_completed", "tasks_overdue"],
-    });
-
-    const avgWorkload =
-      workloads.length > 0
-        ? workloads.reduce((sum, w) => sum + w.workload_percent, 0) /
-          workloads.length
-        : 0;
-
-    let totalCompleted = 0;
-    let totalOverdue = 0;
-    workloads.forEach((w) => {
-      totalCompleted += w.tasks_completed || 0;
-      totalOverdue += w.tasks_overdue || 0;
-    });
-
-    const totalTasks = totalCompleted + totalOverdue;
-    const overallEfficiency =
-      totalTasks > 0 ? (totalCompleted / totalTasks) * 100 : 0;
+    let activeProjects = 0;
+    if (db.Project) {
+      activeProjects = await db.Project.count({
+        where: { status: "in_progress" },
+      });
+    }
 
     return {
       total_employees: totalEmployees,
       active_projects: activeProjects,
-      avg_workload: Math.round(avgWorkload),
-      overall_efficiency: Math.round(overallEfficiency * 10) / 10,
-      overdue_tasks: totalOverdue,
+      avg_workload: Math.round(m.avgWorkload),
+      overall_efficiency: Math.round(m.efficiency * 10) / 10,
+      completed_tasks: m.completed,
+      overdue_tasks: m.overdue,
+      week_analyzed: week,
     };
   }
 
+  /* ===================== DEPARTMENTS (AGGREGATED TO TOP LEVEL) ===================== */
+
   async getDepartmentStats() {
-    const departments = await db.Department.findAll({
-      include: [
-        {
-          model: db.Employee,
-          as: "employees",
-          where: { is_active: true },
-          required: false,
-        },
-      ],
+    const week = await this.getLatestWeek();
+
+    // 1) Загружаем все отделы
+    const allDepts = await db.Department.findAll({
+      attributes: ["id", "name", "parent_id"],
+      raw: true,
     });
 
-    const stats = await Promise.all(
-      departments.map(async (dept) => {
-        const employeeIds = dept.employees.map((e) => e.id);
+    if (!allDepts.length) {
+      return { week_analyzed: week, departments: [] };
+    }
 
-        if (employeeIds.length === 0) {
-          return {
-            id: dept.id,
-            name: dept.name,
-            employee_count: 0,
-            avg_workload: 0,
-            avg_efficiency: 0,
-          };
+    const byId = new Map(allDepts.map((d) => [d.id, d]));
+
+    // 2) Ищем корень (Руководство) = parent_id null
+    const roots = allDepts.filter((d) => d.parent_id == null);
+    const leadership = roots.find((d) => d.name === "Руководство") || roots[0];
+
+    if (!leadership) {
+      throw new Error("Не найден корневой отдел (parent_id = null)");
+    }
+
+    const leadershipId = leadership.id;
+
+    // 3) Верхний уровень = дети руководства
+    const topLevel = allDepts.filter((d) => d.parent_id === leadershipId);
+    const topIds = new Set(topLevel.map((d) => d.id));
+
+    // 4) deptId -> topDeptId (ребенок руководства)
+    const topCache = new Map();
+
+    const getTopDeptId = (deptId) => {
+      if (!deptId) return null;
+      if (topCache.has(deptId)) return topCache.get(deptId);
+
+      let cur = byId.get(deptId);
+      if (!cur) {
+        topCache.set(deptId, null);
+        return null;
+      }
+
+      // если это уже верхний уровень
+      if (topIds.has(cur.id)) {
+        topCache.set(deptId, cur.id);
+        return cur.id;
+      }
+
+      // поднимаемся вверх
+      while (cur && cur.parent_id != null) {
+        const parentId = cur.parent_id;
+
+        // если родитель — руководствo, значит текущий cur был ребенком руководства,
+        // но сюда мы не попадаем, потому что это уже topIds.
+        // мы идем до тех пор, пока не встретим topIds
+        if (topIds.has(parentId)) {
+          topCache.set(deptId, parentId);
+          return parentId;
         }
 
-        const workloads = await db.WorkloadEntry.findAll({
-          where: {
-            employee_id: employeeIds,
-            week_start_date: this.getCurrentWeekStart(),
-          },
-        });
+        cur = byId.get(parentId);
 
-        const avgWorkload =
-          workloads.length > 0
-            ? workloads.reduce((sum, w) => sum + w.workload_percent, 0) /
-              workloads.length
-            : 0;
+        // если дошли до руководства или потеряли родителя — нет верхнего отдела
+        if (!cur || cur.id === leadershipId) {
+          topCache.set(deptId, null);
+          return null;
+        }
 
-        let deptCompleted = 0;
-        let deptOverdue = 0;
+        if (topIds.has(cur.id)) {
+          topCache.set(deptId, cur.id);
+          return cur.id;
+        }
+      }
 
-        workloads.forEach((w) => {
-          deptCompleted += w.tasks_completed || 0;
-          deptOverdue += w.tasks_overdue || 0;
-        });
+      topCache.set(deptId, null);
+      return null;
+    };
 
-        const deptEfficiency =
-          deptCompleted + deptOverdue > 0
-            ? (deptCompleted / (deptCompleted + deptOverdue)) * 100
-            : 0;
-
-        return {
-          id: dept.id,
-          name: dept.name,
-          employee_count: employeeIds.length,
-          avg_workload: Math.round(avgWorkload),
-          avg_efficiency: Math.round(deptEfficiency * 10) / 10,
-        };
-      }),
-    );
-
-    return stats.sort((a, b) => b.avg_efficiency - a.avg_efficiency);
-  }
-
-  async getTopPerformers(limit = 5) {
-    const currentWeek = this.getCurrentWeekStart();
-
-    const employees = await db.Employee.findAll({
-      where: { is_active: true },
-      include: [
-        {
-          model: db.WorkloadEntry,
-          as: "workloads",
-          where: { week_start_date: currentWeek },
-          required: false,
-        },
-      ],
-    });
-
-    const withEfficiency = employees.map((emp) => {
-      let completed = 0;
-      let overdue = 0;
-
-      emp.workloads.forEach((w) => {
-        completed += w.tasks_completed || 0;
-        overdue += w.tasks_overdue || 0;
-      });
-
-      const totalTasks = completed + overdue;
-      const efficiency = totalTasks > 0 ? (completed / totalTasks) * 100 : 0;
-
-      return {
-        id: emp.id,
-        full_name: emp.full_name,
-        department_id: emp.department_id,
-        efficiency: Math.round(efficiency * 10) / 10,
-        completed_tasks: completed,
-        overdue_tasks: overdue,
-      };
-    });
-
-    return withEfficiency
-      .filter((e) => e.efficiency > 0)
-      .sort((a, b) => b.efficiency - a.efficiency)
-      .slice(0, limit);
-  }
-
-  async getProblemAreas() {
-    const problems = [];
-    const currentWeek = this.getCurrentWeekStart();
-
-    const overloaded = await db.WorkloadEntry.findAll({
-      where: {
-        week_start_date: currentWeek,
-        workload_percent: { [Op.gt]: 85 },
-      },
+    // 5) Берем записи за неделю + employee, чтобы знать department_id
+    const entries = await db.WorkloadEntry.findAll({
+      where: { week_start_date: week },
       include: [
         {
           model: db.Employee,
           as: "employee",
-          attributes: ["id", "full_name"],
+          attributes: ["id", "department_id", "is_active"],
+          required: true,
+          where: { is_active: true },
         },
       ],
     });
 
-    if (overloaded.length > 0) {
-      problems.push({
-        type: "overload",
-        message: `${overloaded.length} сотрудников перегружены (>85%)`,
-        employees: overloaded.map((w) => w.employee.full_name),
-        severity: "high",
+    // 6) Агрегируем по TOP отделу
+    const agg = new Map(); // topDeptId -> { employeesSet, workloads[] }
+
+    for (const entry of entries) {
+      const deptId = entry.employee?.department_id;
+      const topDeptId = getTopDeptId(deptId);
+
+      // если сотрудник сидит прямо в руководстве или в каком-то “вне дерева” — пропускаем
+      if (!topDeptId) continue;
+
+      if (!agg.has(topDeptId)) {
+        agg.set(topDeptId, {
+          employeesSet: new Set(),
+          workloads: [],
+        });
+      }
+
+      const bucket = agg.get(topDeptId);
+      bucket.employeesSet.add(entry.employee.id);
+      bucket.workloads.push({
+        tasks_completed: entry.tasks_completed,
+        tasks_overdue: entry.tasks_overdue,
+        workload_percent: entry.workload_percent,
       });
     }
 
-    const projectsWithOverdue = await db.WorkloadEntry.findAll({
-      where: {
-        week_start_date: currentWeek,
-        tasks_overdue: { [Op.gt]: 0 },
-      },
-      attributes: [
-        "project_id",
-        [
-          db.sequelize.fn("SUM", db.sequelize.col("tasks_overdue")),
-          "total_overdue",
-        ],
-        [db.sequelize.col("project.name"), "project_name"],
-      ],
-      group: ["WorkloadEntry.project_id", "project.name"],
+    // 7) Формируем ответ: только верхнеуровневые отделы
+    const result = [];
+    for (const top of topLevel) {
+      const bucket = agg.get(top.id);
+      const workloads = bucket?.workloads || [];
+      const m = this.calcFromWorkloads(workloads);
+
+      result.push({
+        department_id: top.id,
+        department_name: top.name,
+        parent_id: top.parent_id,
+        employees_count: bucket ? bucket.employeesSet.size : 0,
+        avg_workload: Math.round(m.avgWorkload),
+        efficiency: Math.round(m.efficiency * 10) / 10,
+        tasks_completed: m.completed,
+        tasks_overdue: m.overdue,
+      });
+    }
+
+    // сортировка: по эффективности убыв., затем по нагрузке
+    result.sort((a, b) => {
+      if (b.efficiency !== a.efficiency) return b.efficiency - a.efficiency;
+      return b.avg_workload - a.avg_workload;
+    });
+
+    return {
+      week_analyzed: week,
+      departments: result,
+    };
+  }
+
+  /* ===================== TOP PERFORMERS ===================== */
+
+  async getTopPerformers(limit = 5) {
+    const week = await this.getLatestWeek();
+
+    const employees = await db.Employee.findAll({
+      where: { is_active: true },
+      attributes: ["id", "full_name", "department_id"],
       include: [
         {
-          model: db.Project,
-          as: "project",
-          attributes: [],
+          model: db.WorkloadEntry,
+          as: "workloads",
+          where: { week_start_date: week },
+          required: false,
         },
       ],
-      raw: true,
     });
 
-    projectsWithOverdue.forEach((p) => {
-      if (p.dataValues.total_overdue > 5) {
-        problems.push({
-          type: "project_delay",
-          message: `Проект "${p.project.name}" имеет ${p.dataValues.total_overdue} просроченных задач`,
-          project: p.project.name,
-          severity: "medium",
-        });
-      }
+    const scored = employees
+      .map((e) => {
+        const m = this.calcFromWorkloads(e.workloads || []);
+        return {
+          id: e.id,
+          full_name: e.full_name,
+          department_id: e.department_id,
+          efficiency: Math.round(m.efficiency * 10) / 10,
+          avg_workload: Math.round(m.avgWorkload),
+          tasks_completed: m.completed,
+          tasks_overdue: m.overdue,
+          total_tasks: m.totalTasks,
+        };
+      })
+      .filter((x) => x.total_tasks > 0)
+      .sort((a, b) => b.efficiency - a.efficiency)
+      .slice(0, limit);
+
+    return { week_analyzed: week, top: scored };
+  }
+
+  /* ===================== PROBLEM AREAS ===================== */
+
+  async getProblemAreas() {
+    const week = await this.getLatestWeek();
+    const problems = [];
+
+    const overloaded = await db.WorkloadEntry.findAll({
+      where: {
+        week_start_date: week,
+        workload_percent: { [Op.gt]: 85 },
+      },
+      include: [{ model: db.Employee, as: "employee" }],
     });
+
+    if (overloaded.length) {
+      problems.push({
+        type: "overload",
+        severity: "high",
+        count: overloaded.length,
+        employees: overloaded.map((e) => e.employee?.full_name).filter(Boolean),
+      });
+    }
 
     const lowEfficiency = await this.getLowEfficiencyEmployees(60);
-    if (lowEfficiency.length > 0) {
+    if (lowEfficiency.length) {
       problems.push({
         type: "low_efficiency",
-        message: `${lowEfficiency.length} сотрудников с эффективностью <60%`,
-        employees: lowEfficiency.map((e) => e.full_name),
         severity: "medium",
+        count: lowEfficiency.length,
+        employees: lowEfficiency.map((e) => e.full_name),
       });
     }
 
     return problems;
   }
 
-  async getLowEfficiencyEmployees(threshold = 60) {
+  /* ===================== LOW EFFICIENCY ===================== */
+
+  async getLowEfficiencyEmployees(threshold) {
+    const week = await this.getLatestWeek();
+
     const employees = await db.Employee.findAll({
       where: { is_active: true },
       include: [
         {
           model: db.WorkloadEntry,
           as: "workloads",
-          where: { week_start_date: this.getCurrentWeekStart() },
+          where: { week_start_date: week },
           required: false,
         },
-      ],
-    });
-
-    return employees
-      .filter((emp) => {
-        let completed = 0;
-        let overdue = 0;
-
-        emp.workloads.forEach((w) => {
-          completed += w.tasks_completed || 0;
-          overdue += w.tasks_overdue || 0;
-        });
-
-        const total = completed + overdue;
-        if (total === 0) return false;
-
-        const efficiency = (completed / total) * 100;
-        return efficiency < threshold;
-      })
-      .map((emp) => ({
-        id: emp.id,
-        full_name: emp.full_name,
-        department_id: emp.department_id,
-      }));
-  }
-
-  // ==================== ДЛЯ КАРТОЧКИ СОТРУДНИКА ====================
-
-  async getEmployeeAnalytics(employeeId) {
-    const currentWeek = this.getCurrentWeekStart();
-    const previousWeek = this.getPreviousWeekStart();
-
-    const currentWorkloads = await db.WorkloadEntry.findAll({
-      where: {
-        employee_id: employeeId,
-        week_start_date: currentWeek,
-      },
-      include: [
         {
-          model: db.Project,
-          as: "project",
+          model: db.Department,
+          as: "department",
           attributes: ["id", "name"],
         },
       ],
     });
 
-    const previousWorkloads = await db.WorkloadEntry.findAll({
-      where: {
-        employee_id: employeeId,
-        week_start_date: previousWeek,
-      },
+    return employees
+      .map((e) => {
+        const m = this.calcFromWorkloads(e.workloads || []);
+        return {
+          id: e.id,
+          full_name: e.full_name,
+          department_id: e.department_id,
+          department_name: e.department?.name || "Без отдела",
+          efficiency: Math.round(m.efficiency * 10) / 10,
+          tasks_completed: m.completed,
+          tasks_overdue: m.overdue,
+        };
+      })
+      .filter(
+        (e) =>
+          e.tasks_completed + e.tasks_overdue > 0 && e.efficiency < threshold,
+      );
+  }
+
+  /* ===================== EMPLOYEE ANALYTICS ===================== */
+
+  async getEmployeeAnalytics(employeeId) {
+    const week = await this.getLatestWeek();
+
+    const workloads = await db.WorkloadEntry.findAll({
+      where: { employee_id: employeeId, week_start_date: week },
+      include: [{ model: db.Project, as: "project" }],
     });
 
-    const fourWeeksAgo = new Date(currentWeek);
-    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-
-    const kpiHistory = await db.KPIMetric.findAll({
-      where: {
-        employee_id: employeeId,
-        metric_name: "efficiency",
-        period: { [Op.between]: [fourWeeksAgo, currentWeek] },
-      },
-      order: [["period", "ASC"]],
-    });
-
-    const calculateMetrics = (workloads) => {
-      let totalWorkload = 0;
-      let completed = 0;
-      let overdue = 0;
-      const projectMap = new Map();
-
-      workloads.forEach((w) => {
-        totalWorkload += w.workload_percent || 0;
-        completed += w.tasks_completed || 0;
-        overdue += w.tasks_overdue || 0;
-
-        if (w.project) {
-          const projectId = w.project.id;
-          if (!projectMap.has(projectId)) {
-            projectMap.set(projectId, {
-              name: w.project.name,
-              workload: 0,
-              completed: 0,
-              overdue: 0,
-            });
-          }
-          const proj = projectMap.get(projectId);
-          proj.workload += w.workload_percent || 0;
-          proj.completed += w.tasks_completed || 0;
-          proj.overdue += w.tasks_overdue || 0;
-        }
-      });
-
-      const avgWorkload =
-        workloads.length > 0 ? totalWorkload / workloads.length : 0;
-      const totalTasks = completed + overdue;
-      const efficiency = totalTasks > 0 ? (completed / totalTasks) * 100 : 0;
-
-      return {
-        avgWorkload,
-        efficiency,
-        completed,
-        overdue,
-        totalTasks,
-        projects: Array.from(projectMap.values()),
-        projectCount: projectMap.size,
-        totalWorkload,
-      };
-    };
-
-    const current = calculateMetrics(currentWorkloads);
-    const previous = calculateMetrics(previousWorkloads);
+    const m = this.calcFromWorkloads(workloads);
 
     return {
       current_week: {
-        workload: Math.round(current.avgWorkload),
-        efficiency: Math.round(current.efficiency * 10) / 10,
-        tasks_completed: current.completed,
-        tasks_overdue: current.overdue,
-        task_completion_rate:
-          current.totalTasks > 0
-            ? Math.round((current.completed / current.totalTasks) * 100)
-            : 0,
-        active_projects: current.projectCount,
+        workload: Math.round(m.avgWorkload),
+        efficiency: Math.round(m.efficiency * 10) / 10,
+        tasks_completed: m.completed,
+        tasks_overdue: m.overdue,
+        task_completion_rate: m.totalTasks > 0 ? Math.round(m.efficiency) : 0,
+        active_projects: new Set(workloads.map((w) => w.project_id)).size,
       },
-
-      changes: {
-        workload_change: Math.round(current.avgWorkload - previous.avgWorkload),
-        efficiency_change:
-          Math.round((current.efficiency - previous.efficiency) * 10) / 10,
-        tasks_change: current.completed - previous.completed,
-      },
-
-      projects: current.projects.map((p) => ({
-        name: p.name,
-        workload_share:
-          current.totalWorkload > 0
-            ? Math.round((p.workload / current.totalWorkload) * 100)
-            : 0,
-        tasks_completed: p.completed,
-        tasks_overdue: p.overdue,
+      projects: workloads.map((w) => ({
+        name: w.project?.name || "Проект",
+        workload_share: Number(w.workload_percent || 0),
+        tasks_completed: Number(w.tasks_completed || 0),
+        tasks_overdue: Number(w.tasks_overdue || 0),
       })),
-
-      kpi_history: kpiHistory.map((k) => {
-        // Безопасное преобразование даты
-        let weekFormatted = "—";
-        if (k.period) {
-          try {
-            const date =
-              k.period instanceof Date ? k.period : new Date(k.period);
-            if (!isNaN(date.getTime())) {
-              weekFormatted = date.toISOString().split("T")[0];
-            }
-          } catch (e) {
-            // Если ошибка - оставляем как есть
-            weekFormatted = String(k.period).split("T")[0] || "—";
-          }
-        }
-
-        return {
-          week: weekFormatted,
-          value: k.metric_value,
-        };
-      }),
-
-      recommendations: this.generateRecommendations(current, previous),
     };
   }
 
-  generateRecommendations(current, previous) {
-    const recs = [];
-
-    if (current.avgWorkload > 85) {
-      recs.push("Перегрузка! Снизьте нагрузку или перераспределите задачи.");
-    }
-
-    if (current.efficiency < 70) {
-      recs.push(
-        "Эффективность ниже среднего. Рассмотрите дополнительные ресурсы.",
-      );
-    }
-
-    if (current.overdue > 5) {
-      recs.push(
-        "Много просроченных задач. Приоритезируйте завершение текущих.",
-      );
-    }
-
-    if (current.efficiency - previous.efficiency > 10) {
-      recs.push("Отличный рост эффективности! Продолжайте в том же духе.");
-    }
-
-    return recs.length > 0
-      ? recs
-      : ["Показатели в норме. Продолжайте работать!"];
-  }
-
-  // ==================== ВЫЧИСЛЕНИЕ И СОХРАНЕНИЕ KPI ====================
+  /* ===================== KPI RECALCULATION ===================== */
 
   async calculateAndStoreKPIs() {
+    const week = await this.getLatestWeek();
+
+    // Подстройка под имя модели KPI
+    const KpiModel =
+      db.KpiMetric || db.KPIMetric || db.Kpi_Metric || db.kpi_metric;
+    if (!KpiModel) {
+      throw new Error("Модель KPI не найдена в db (KpiMetric/KPIMetric)");
+    }
+
     const employees = await db.Employee.findAll({
       where: { is_active: true },
-    });
-
-    const currentWeek = this.getCurrentWeekStart();
-
-    for (const employee of employees) {
-      const workloads = await db.WorkloadEntry.findAll({
-        where: {
-          employee_id: employee.id,
-          week_start_date: currentWeek,
-        },
-      });
-
-      let completed = 0;
-      let overdue = 0;
-      let totalWorkload = 0;
-
-      workloads.forEach((w) => {
-        completed += w.tasks_completed || 0;
-        overdue += w.tasks_overdue || 0;
-        totalWorkload += w.workload_percent || 0;
-      });
-
-      const avgWorkload =
-        workloads.length > 0 ? totalWorkload / workloads.length : 0;
-      const totalTasks = completed + overdue;
-      const efficiency = totalTasks > 0 ? (completed / totalTasks) * 100 : 0;
-
-      await db.KPIMetric.bulkCreate(
-        [
-          {
-            employee_id: employee.id,
-            metric_name: "efficiency",
-            metric_value: Math.round(efficiency * 10) / 10,
-            period: currentWeek,
-          },
-          {
-            employee_id: employee.id,
-            metric_name: "avg_workload",
-            metric_value: Math.round(avgWorkload),
-            period: currentWeek,
-          },
-          {
-            employee_id: employee.id,
-            metric_name: "tasks_completed",
-            metric_value: completed,
-            period: currentWeek,
-          },
-        ],
+      attributes: ["id"],
+      include: [
         {
-          updateOnDuplicate: ["metric_value", "updated_at"],
+          model: db.WorkloadEntry,
+          as: "workloads",
+          where: { week_start_date: week },
+          required: false,
+        },
+      ],
+    });
+
+    const rows = [];
+
+    for (const e of employees) {
+      const m = this.calcFromWorkloads(e.workloads || []);
+      const efficiency =
+        m.totalTasks > 0 ? Math.round(m.efficiency * 10) / 10 : 0;
+      const avgWorkload = Math.round(m.avgWorkload * 10) / 10;
+      const tasksCompleted = Number(m.completed || 0);
+
+      rows.push(
+        {
+          employee_id: e.id,
+          metric_type: "efficiency",
+          value: efficiency,
+          week_start: week,
+        },
+        {
+          employee_id: e.id,
+          metric_type: "avg_workload",
+          value: avgWorkload,
+          week_start: week,
+        },
+        {
+          employee_id: e.id,
+          metric_type: "tasks_completed",
+          value: tasksCompleted,
+          week_start: week,
         },
       );
     }
 
-    console.log(
-      `KPI вычислены и сохранены для ${employees.length} сотрудников`,
-    );
-  }
-
-  async calculateWorkloadFromTasks() {
-    try {
-      const currentWeek = this.getCurrentWeekStart();
-
-      // 1. Получаем всех активных сотрудников
-      const employees = await db.Employee.findAll({
-        where: { is_active: true },
-        attributes: ["id", "full_name"],
-      });
-
-      console.log(
-        `🔄 Вычисление workload для ${employees.length} сотрудников...`,
-      );
-
-      let updatedRecords = 0;
-
-      // 2. Для каждого сотрудника вычисляем нагрузку
-      for (const employee of employees) {
-        const workloads = await db.WorkloadEntry.findAll({
-          where: {
-            employee_id: employee.id,
-            week_start_date: currentWeek,
-          },
-          include: [
-            {
-              model: db.Project,
-              as: "project",
-              attributes: ["id", "name"],
-            },
-          ],
-        });
-
-        if (workloads.length === 0) continue;
-
-        // 3. Считаем общее количество задач сотрудника за неделю
-        let totalEmployeeTasks = 0;
-        workloads.forEach((w) => {
-          const tasksInEntry =
-            (w.tasks_completed || 0) + (w.tasks_overdue || 0);
-          totalEmployeeTasks += tasksInEntry;
-        });
-
-        // 4. Если задач нет - устанавливаем 0 и пропускаем
-        if (totalEmployeeTasks === 0) {
-          for (const w of workloads) {
-            if (w.workload_percent !== 0) {
-              w.workload_percent = 0;
-              await w.save();
-              updatedRecords++;
-            }
-          }
-          continue;
-        }
-
-        // 5. Вычисляем процент для каждой записи
-        for (const workload of workloads) {
-          const tasksInThisEntry =
-            (workload.tasks_completed || 0) + (workload.tasks_overdue || 0);
-
-          // Формула: задачи в этом проекте / общие задачи сотрудника * 100
-          const calculatedPercent = Math.round(
-            (tasksInThisEntry / totalEmployeeTasks) * 100,
-          );
-
-          // Ограничиваем 0-100%
-          const finalPercent = Math.max(0, Math.min(100, calculatedPercent));
-
-          // Обновляем если значение изменилось
-          if (workload.workload_percent !== finalPercent) {
-            workload.workload_percent = finalPercent;
-            await workload.save();
-            updatedRecords++;
-          }
-        }
+    return await db.sequelize.transaction(async (t) => {
+      await KpiModel.destroy({ where: { week_start: week }, transaction: t });
+      if (rows.length) {
+        await KpiModel.bulkCreate(rows, { transaction: t });
       }
-
-      console.log(
-        `✅ Workload percentages обновлены: ${updatedRecords} записей`,
-      );
-
-      // 6. Автоматически пересчитываем KPI с новыми значениями
-      await this.calculateAndStoreKPIs();
-
-      return {
-        success: true,
-        updated_records: updatedRecords,
-        week: currentWeek.toISOString().split("T")[0],
-      };
-    } catch (error) {
-      console.error("❌ Ошибка вычисления workload:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Упрощенная версия для одного сотрудника (для тестов)
-   */
-  async calculateEmployeeWorkload(employeeId) {
-    const currentWeek = this.getCurrentWeekStart();
-
-    const workloads = await db.WorkloadEntry.findAll({
-      where: {
-        employee_id: employeeId,
-        week_start_date: currentWeek,
-      },
+      return { week_analyzed: week, inserted: rows.length };
     });
-
-    let totalTasks = 0;
-    workloads.forEach((w) => {
-      totalTasks += (w.tasks_completed || 0) + (w.tasks_overdue || 0);
-    });
-
-    if (totalTasks === 0) {
-      // Если нет задач - устанавливаем 0
-      for (const w of workloads) {
-        w.workload_percent = 0;
-        await w.save();
-      }
-      return 0;
-    }
-
-    // Обновляем каждую запись
-    for (const workload of workloads) {
-      const tasksInEntry =
-        (workload.tasks_completed || 0) + (workload.tasks_overdue || 0);
-      const percent = Math.round((tasksInEntry / totalTasks) * 100);
-      workload.workload_percent = percent;
-      await workload.save();
-    }
-
-    return totalTasks;
   }
 }
 

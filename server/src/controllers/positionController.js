@@ -1,20 +1,15 @@
 const positionService = require("../services/positionService");
 
 class PositionController {
-  // Получить все должности
+  // Получить все должности (без пагинации)
   async getAll(req, res) {
     try {
-      const { page = 1, limit = 10, search = "" } = req.query;
-      const result = await positionService.getAllPositions({
-        page,
-        limit,
-        search,
-      });
+      const { search = "" } = req.query;
+      const positions = await positionService.getAllPositions({ search });
 
       res.json({
         success: true,
-        data: result.positions,
-        pagination: result.pagination,
+        data: positions,
       });
     } catch (error) {
       res.status(500).json({
@@ -23,6 +18,7 @@ class PositionController {
       });
     }
   }
+
   // Получить должность по ID
   async getById(req, res) {
     try {
@@ -41,6 +37,7 @@ class PositionController {
       });
     }
   }
+
   // Создать должность
   async create(req, res) {
     try {
@@ -60,6 +57,7 @@ class PositionController {
       });
     }
   }
+
   // Обновить должность
   async update(req, res) {
     try {
@@ -78,14 +76,15 @@ class PositionController {
         error.message === "Должность не найдена"
           ? 404
           : error.message.includes("уже существует")
-          ? 409
-          : 500;
+            ? 409
+            : 500;
       res.status(status).json({
         success: false,
         error: error.message,
       });
     }
   }
+
   // Удалить должность
   async delete(req, res) {
     try {
@@ -101,14 +100,15 @@ class PositionController {
         error.message === "Должность не найдена"
           ? 404
           : error.message.includes("привязаны сотрудники")
-          ? 400
-          : 500;
+            ? 400
+            : 500;
       res.status(status).json({
         success: false,
         error: error.message,
       });
     }
   }
+
   // Получить сотрудников с этой должностью
   async getEmployees(req, res) {
     try {

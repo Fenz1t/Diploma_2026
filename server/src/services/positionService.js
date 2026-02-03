@@ -2,31 +2,19 @@ const db = require("../db/models");
 const { Op } = require("sequelize");
 
 class PositionService {
-  // Получить все должности
-  async getAllPositions({ page = 1, limit = 10, search = "" }) {
-    const offset = (page - 1) * limit;
-
+  // Получить все должности (без пагинации)
+  async getAllPositions({ search = "" } = {}) {
     const where = {};
     if (search) {
       where.name = { [Op.iLike]: `%${search}%` };
     }
 
-    const { count, rows } = await db.Position.findAndCountAll({
+    const positions = await db.Position.findAll({
       where,
-      limit: parseInt(limit),
-      offset: parseInt(offset),
       order: [["name", "ASC"]],
     });
 
-    return {
-      positions: rows,
-      pagination: {
-        total: count,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit),
-      },
-    };
+    return positions;
   }
 
   async getPositionById(id) {
@@ -84,20 +72,19 @@ class PositionService {
   }
 
   // Получить всех сотрудников с этой должностью
-  // Получить всех сотрудников с этой должностью
   async getEmployeesByPosition(positionId) {
     const position = await db.Position.findByPk(positionId, {
       include: [
         {
           model: db.Employee,
-          as: "employees", // Убедитесь, что это соответствует вашему алиасу в модели
+          as: "employees",
           include: [
             {
               model: db.Department,
-              as: "department", // Включить информацию о департаменте, если нужно
+              as: "department",
             },
           ],
-          attributes: { exclude: ["password"] }, // Исключить пароль, если есть
+          attributes: { exclude: ["password"] },
         },
       ],
     });
