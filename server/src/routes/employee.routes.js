@@ -40,7 +40,7 @@ router.delete('/:id/photo',
   employeeController.deletePhoto
 );
 
-router.get('/department/:departmentId',
+router.get('/department/:id',
   validate(common.idValidator),
   employeeController.getByDepartment
 );

@@ -44,7 +44,7 @@ class EmployeeController {
 
       const employee = await employeeService.createEmployee(
         employeeData,
-        photoFile || null
+        photoFile || null,
       );
 
       res.status(201).json({
@@ -70,7 +70,7 @@ class EmployeeController {
       const employee = await employeeService.updateEmployee(
         id,
         employeeData,
-        photoFile || null
+        photoFile || null,
       );
 
       res.json({
@@ -84,8 +84,8 @@ class EmployeeController {
         error.message === "Сотрудник не найден"
           ? 404
           : error.message.includes("уже существует")
-          ? 409
-          : 400;
+            ? 409
+            : 400;
       res.status(status).json({
         success: false,
         error: error.message,
@@ -145,8 +145,8 @@ class EmployeeController {
         error.message === "Сотрудник не найден"
           ? 404
           : error.message === "У сотрудника нет фото"
-          ? 400
-          : 500;
+            ? 400
+            : 500;
       res.status(status).json({
         success: false,
         error: error.message,
@@ -156,14 +156,21 @@ class EmployeeController {
 
   async getByDepartment(req, res) {
     try {
-      const { departmentId } = req.params;
+      const { id } = req.params;
+
+      // includeChildren=true|false
+      const includeChildren =
+        String(req.query.includeChildren).toLowerCase() === "true";
+
       const employees = await employeeService.getEmployeesByDepartment(
-        departmentId
+        id,
+        includeChildren,
       );
 
       res.json({
         success: true,
         count: employees.length,
+        includeChildren,
         data: employees,
       });
     } catch (error) {

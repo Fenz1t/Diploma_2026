@@ -4,7 +4,7 @@ import { createStackNavigator } from "@react-navigation/stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
-// Экран дашборда (пока заглушка)
+// Экран дашборда
 import DashboardScreen from "../screens/Dashboard/DashboardScreen";
 // Экран должностей
 import PositionsScreen from "../screens/Positions/PositionsScreen";
@@ -12,6 +12,10 @@ import PositionFormScreen from "../screens/Positions/PositionFormScreen";
 // Проекты
 import ProjectsScreen from "../screens/Projects/ProjectsScreen";
 import ProjectFormScreen from "../screens/Projects/ProjectFormScreen";
+// Сотрудники+Отделы
+
+import DepartmentsTreeScreen from "../screens/Employees/DepartmentsTreeScreen";
+import DepartmentEmployeesScreen from "../screens/Employees/DepartmentEmployeesScreen";
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -40,6 +44,15 @@ const ProjectsStack = () => (
         headerShown: true,
         title: "Проект",
       }}
+    />
+  </Stack.Navigator>
+);
+const EmployeesStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name="DepartmentsTree" component={DepartmentsTreeScreen} />
+    <Stack.Screen
+      name="DepartmentEmployees"
+      component={DepartmentEmployeesScreen}
     />
   </Stack.Navigator>
 );
@@ -73,6 +86,21 @@ const MainTabs = () => {
           ),
         }}
       />
+      <Tab.Screen
+        name="Employees"
+        component={EmployeesStack}
+        options={{
+          tabBarLabel: "Сотрудники",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons
+              name="account-group"
+              color={color}
+              size={size}
+            />
+          ),
+        }}
+      />
+
       <Tab.Screen
         name="Positions"
         component={PositionsStack}

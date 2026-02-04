@@ -65,7 +65,7 @@ class EmployeeService {
 
     if (employeeData.department_id) {
       const department = await db.Department.findByPk(
-        employeeData.department_id
+        employeeData.department_id,
       );
       if (!department) {
         throw new Error("Указанный отдел не существует");
@@ -107,7 +107,7 @@ class EmployeeService {
       employeeData.department_id !== employee.department_id
     ) {
       const department = await db.Department.findByPk(
-        employeeData.department_id
+        employeeData.department_id,
       );
       if (!department) {
         throw new Error("Указанный отдел не существует");
@@ -170,20 +170,71 @@ class EmployeeService {
     return { message: "Фото успешно удалено" };
   }
 
-  async getEmployeesByDepartment(departmentId) {
-    const department = await db.Department.findByPk(departmentId);
-    if (!department) {
+  async getEmployeesByDepartment(departmentId, includeChildren = false) {
+    // 1) Проверим, что отдел существует
+    const dept = await db.Department.findByPk(departmentId, {
+      attributes: ["id"],
+    });
+
+    if (!dept) {
       throw new Error("Отдел не найден");
     }
 
-    return await db.Employee.findAll({
+    // 2) Соберём список departmentIds
+    let departmentIds = [Number(departmentId)];
+
+    if (includeChildren) {
+      departmentIds = await this._getDepartmentTreeIds(Number(departmentId));
+    }
+
+    // 3) Получаем сотрудников
+    const employees = await db.Employee.findAll({
       where: {
-        department_id: departmentId,
+        department_id: { [Op.in]: departmentIds },
         is_active: true,
       },
-      include: [{ model: db.Position, as: "position" }],
+      include: [
+        { model: db.Position, as: "position" },
+        {
+          model: db.Department,
+          as: "department",
+          required: true,
+        },
+      ],
       order: [["full_name", "ASC"]],
     });
+
+    return employees;
+  }
+
+  /**
+   * Возвращает id всех отделов в ветке (root + descendants).
+   * Делается через итеративный BFS, чтобы не упереться в recursion depth.
+   */
+  async _getDepartmentTreeIds(rootId) {
+    const ids = new Set([rootId]);
+    let queue = [rootId];
+
+    while (queue.length > 0) {
+      const children = await db.Department.findAll({
+        where: { parent_id: { [Op.in]: queue } },
+        attributes: ["id"],
+        raw: true,
+      });
+
+      const next = [];
+      for (const row of children) {
+        const childId = Number(row.id);
+        if (!ids.has(childId)) {
+          ids.add(childId);
+          next.push(childId);
+        }
+      }
+
+      queue = next;
+    }
+
+    return Array.from(ids);
   }
 }
 
