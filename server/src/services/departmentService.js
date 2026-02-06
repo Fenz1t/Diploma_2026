@@ -33,7 +33,7 @@ class DepartmentService {
           attributes: ["id", "name"],
         },
         {
-          model: db.Department, 
+          model: db.Department,
           as: "children",
           attributes: ["id", "name"],
         },
@@ -61,7 +61,7 @@ class DepartmentService {
     if (departmentData.parent_id) {
       const isCircular = await this.isCircularReference(
         null,
-        departmentData.parent_id
+        departmentData.parent_id,
       );
       if (isCircular) {
         throw new Error("Невозможно создать циклическую ссылку в иерархии");
@@ -118,21 +118,33 @@ class DepartmentService {
 
   // Получить иерархию отделов
   async getDepartmentHierarchy() {
-    const departments = await db.Department.findAll({
+    // Функция для рекурсивной загрузки детей
+    const loadChildren = async (parentId) => {
+      const children = await db.Department.findAll({
+        where: { parent_id: parentId },
+        order: [["name", "ASC"]],
+      });
+
+      // Рекурсивно загружаем детей для каждого дочернего отдела
+      for (const child of children) {
+        child.dataValues.children = await loadChildren(child.id);
+      }
+
+      return children;
+    };
+
+    // Получаем корневые отделы
+    const rootDepartments = await db.Department.findAll({
       where: { parent_id: null },
-      include: {
-        model: db.Department,
-        as: "children",
-        include: {
-          model: db.Department, 
-          as: "children",
-          required: false,
-        },
-      },
       order: [["name", "ASC"]],
     });
 
-    return departments;
+    // Для каждого корневого отдела рекурсивно загружаем детей
+    for (const department of rootDepartments) {
+      department.dataValues.children = await loadChildren(department.id);
+    }
+
+    return rootDepartments;
   }
 
   // Проверка циклических ссылок

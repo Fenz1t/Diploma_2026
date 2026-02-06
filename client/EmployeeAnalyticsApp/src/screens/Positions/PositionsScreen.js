@@ -74,13 +74,11 @@ const PositionsScreen = ({ navigation }) => {
     });
   };
 
-  // Просмотр сотрудников
   const handleViewEmployees = (position) => {
-    // Пока заглушка - потом сделаешь экран сотрудников
-    Alert.alert(
-      "Сотрудники",
-      `Показ сотрудников для "${position.name}" (ID: ${position.id})`,
-    );
+    navigation.navigate("PositionEmployees", {
+      positionId: position.id,
+      positionName: position.name,
+    });
   };
 
   // Создание новой должности

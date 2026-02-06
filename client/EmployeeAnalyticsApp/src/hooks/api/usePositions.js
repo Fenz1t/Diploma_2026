@@ -32,6 +32,14 @@ export const useCreatePosition = () => {
   });
 };
 
+export const usePositionEmployees = (positionId) => {
+  return useQuery({
+    queryKey: ["positionEmployees", positionId],
+    queryFn: () => positionApi.getEmployees(positionId),
+    enabled: !!positionId,
+  });
+};
+
 export const useUpdatePosition = () => {
   const queryClient = useQueryClient();
 

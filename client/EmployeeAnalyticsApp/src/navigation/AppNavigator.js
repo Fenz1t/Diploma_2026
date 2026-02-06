@@ -16,6 +16,9 @@ import ProjectFormScreen from "../screens/Projects/ProjectFormScreen";
 
 import DepartmentsTreeScreen from "../screens/Employees/DepartmentsTreeScreen";
 import DepartmentEmployeesScreen from "../screens/Employees/DepartmentEmployeesScreen";
+import PositionEmployeesScreen from "../screens/Positions/PositionEmployeesScreen";
+import ReportViewerScreen from "../screens/Reports/ReportViewerScreen";
+import ReportsListScreen from "../screens/Reports/ReportsListScreen";
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -24,12 +27,22 @@ const Tab = createBottomTabNavigator();
 const PositionsStack = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="PositionsList" component={PositionsScreen} />
+
     <Stack.Screen
       name="PositionForm"
       component={PositionFormScreen}
       options={{
         headerShown: true,
         title: "Должность",
+      }}
+    />
+
+    {/* ⬇️ ВОТ ЭТО НОВОЕ */}
+    <Stack.Screen
+      name="PositionEmployees"
+      component={PositionEmployeesScreen}
+      options={{
+        headerShown: false,
       }}
     />
   </Stack.Navigator>
@@ -53,6 +66,20 @@ const EmployeesStack = () => (
     <Stack.Screen
       name="DepartmentEmployees"
       component={DepartmentEmployeesScreen}
+    />
+  </Stack.Navigator>
+);
+const ReportsStack = () => (
+  <Stack.Navigator>
+    <Stack.Screen
+      name="ReportsList"
+      component={ReportsListScreen}
+      options={{ title: "Отчеты" }}
+    />
+    <Stack.Screen
+      name="ReportViewer"
+      component={ReportViewerScreen}
+      options={{ title: "Отчет" }}
     />
   </Stack.Navigator>
 );
@@ -123,6 +150,20 @@ const MainTabs = () => {
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons
               name="folder-multiple"
+              color={color}
+              size={size}
+            />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Reports"
+        component={ReportsStack}
+        options={{
+          tabBarLabel: "Отчеты",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons
+              name="file-table-outline"
               color={color}
               size={size}
             />

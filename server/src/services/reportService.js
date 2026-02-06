@@ -6,205 +6,305 @@ const fs = require("fs");
 const path = require("path");
 
 class ReportService {
-  // ==================== ОТЧЕТ ПО СОТРУДНИКАМ ====================
+  /* ===================== HELPERS ===================== */
+  async getLatestWeek() {
+    const row = await db.WorkloadEntry.findOne({
+      attributes: [
+        [db.sequelize.fn("MAX", db.sequelize.col("week_start_date")), "week"],
+      ],
+      raw: true,
+    });
+    if (!row?.week) throw new Error("Нет загруженных данных");
+    return row.week;
+  }
 
-  async generateEmployeesReport(filters = {}) {
-    const {
-      department_ids = [],
-      position_ids = [],
-      date_from,
-      date_to,
-      is_active = true,
-      include_kpi = false,
-    } = filters;
-
-    const where = { is_active };
-
-    if (department_ids.length > 0) {
-      where.department_id = { [Op.in]: department_ids };
+  calcFromWorkloads(workloads) {
+    let completed = 0;
+    let overdue = 0;
+    let workloadSum = 0;
+    for (const w of workloads) {
+      completed += Number(w.tasks_completed || 0);
+      overdue += Number(w.tasks_overdue || 0);
+      workloadSum += Number(w.workload_percent || 0);
     }
+    const totalTasks = completed + overdue;
+    const avgWorkload = workloads.length ? workloadSum / workloads.length : 0;
+    const efficiency = totalTasks > 0 ? (completed / totalTasks) * 100 : 0;
+    return { completed, overdue, totalTasks, avgWorkload, efficiency };
+  }
 
-    if (position_ids.length > 0) {
-      where.position_id = { [Op.in]: position_ids };
-    }
-
-    const include = [
-      { model: db.Department, as: "department" },
-      { model: db.Position, as: "position" },
-    ];
-
-    // Если нужны KPI - добавляем загрузку
-    if (include_kpi) {
-      const dateCondition =
-        date_from && date_to
-          ? { week_start_date: { [Op.between]: [date_from, date_to] } }
-          : { week_start_date: this.getCurrentMonthStart() };
-
-      include.push({
-        model: db.WorkloadEntry,
-        as: "workloads",
-        where: dateCondition,
-        required: false,
-      });
-    }
-
+  /* ===================== KPI REPORT ===================== */
+  async generateKPIReport() {
+    const week = await this.getLatestWeek();
     const employees = await db.Employee.findAll({
-      where,
-      include,
-      order: [["full_name", "ASC"]],
+      where: { is_active: true },
+      include: [
+        { model: db.Department, as: "department" },
+        { model: db.Position, as: "position" },
+        {
+          model: db.WorkloadEntry,
+          as: "workloads",
+          where: { week_start_date: week },
+          required: false,
+        },
+      ],
     });
 
-    // Форматируем данные
-    const formattedData = employees.map((employee) => {
-      // Безопасное преобразование даты
-      let hireDateFormatted = "—";
-      if (employee.hire_date) {
-        try {
-          const hireDate =
-            employee.hire_date instanceof Date
-              ? employee.hire_date
-              : new Date(employee.hire_date);
-          hireDateFormatted = hireDate.toISOString().split("T")[0];
-        } catch (e) {
-          hireDateFormatted = "—";
-        }
-      }
-
-      const baseData = {
-        id: employee.id,
-        full_name: employee.full_name,
-        department: employee.department?.name || "—",
-        position: employee.position?.name || "—",
-        email: employee.email || "—",
-        phone: employee.phone || "—",
-        hire_date: hireDateFormatted, // ← ИСПРАВЛЕНО
-        is_active: employee.is_active ? "Да" : "Нет",
+    const data = employees.map((e) => {
+      const m = this.calcFromWorkloads(e.workloads || []);
+      return {
+        employee_id: e.id,
+        employee: e.full_name,
+        department: e.department?.name || "—",
+        position: e.position?.name || "—",
+        avg_workload: Math.round(m.avgWorkload),
+        tasks_completed: m.completed,
+        tasks_overdue: m.overdue,
+        efficiency: Math.round(m.efficiency),
       };
+    });
 
-      if (include_kpi && employee.workloads) {
-        let completed = 0;
-        let overdue = 0;
-        let workload = 0;
+    return {
+      metadata: {
+        report_type: "kpi",
+        generated_at: new Date().toISOString(),
+        total_records: data.length,
+        week_analyzed: week,
+      },
+      data,
+    };
+  }
 
-        employee.workloads.forEach((w) => {
-          completed += w.tasks_completed || 0;
-          overdue += w.tasks_overdue || 0;
-          workload += w.workload_percent || 0;
-        });
+  /* ===================== DEPARTMENTS REPORT ===================== */
+  async generateDepartmentsReport() {
+    const week = await this.getLatestWeek();
+    const allDepts = await db.Department.findAll({ raw: true });
+    if (!allDepts.length) return { week_analyzed: week, departments: [] };
 
-        const totalTasks = completed + overdue;
+    const byId = new Map(allDepts.map((d) => [d.id, d]));
+    const roots = allDepts.filter((d) => d.parent_id == null);
+    const leadership = roots.find((d) => d.name === "Руководство") || roots[0];
+    if (!leadership)
+      throw new Error("Не найден корневой отдел (parent_id = null)");
+    const leadershipId = leadership.id;
 
-        baseData.avg_workload =
-          employee.workloads.length > 0
-            ? Math.round(workload / employee.workloads.length)
-            : 0;
-        baseData.tasks_completed = completed;
-        baseData.tasks_overdue = overdue;
-        baseData.efficiency =
-          totalTasks > 0 ? Math.round((completed / totalTasks) * 100) : 0;
+    // Собираем все отделы с иерархией
+    const topLevel = [
+      leadership,
+      ...allDepts.filter(
+        (d) => d.parent_id === leadershipId && d.id !== leadershipId,
+      ),
+    ];
+
+    // Загружаем все записи сотрудников
+    const entries = await db.WorkloadEntry.findAll({
+      where: { week_start_date: week },
+      include: [
+        {
+          model: db.Employee,
+          as: "employee",
+          attributes: ["id", "department_id", "is_active"],
+          required: true,
+          where: { is_active: true },
+        },
+      ],
+    });
+
+    // Инициализация агрегации
+    const agg = new Map();
+
+    for (const entry of entries) {
+      let deptId = entry.employee?.department_id;
+      while (deptId && !agg.has(deptId)) {
+        agg.set(deptId, { employeesSet: new Set(), workloads: [] });
+        const parent = byId.get(deptId);
+        deptId = parent?.parent_id;
       }
+    }
 
-      return baseData;
+    // Агрегируем все записи, включая родителей
+    for (const entry of entries) {
+      const allParentIds = [];
+      let curDeptId = entry.employee.department_id;
+      while (curDeptId) {
+        allParentIds.push(curDeptId);
+        const parent = byId.get(curDeptId);
+        curDeptId = parent?.parent_id;
+      }
+      for (const dId of allParentIds) {
+        const bucket = agg.get(dId);
+        if (!bucket) continue;
+        bucket.employeesSet.add(entry.employee.id);
+        bucket.workloads.push({
+          tasks_completed: entry.tasks_completed,
+          tasks_overdue: entry.tasks_overdue,
+          workload_percent: entry.workload_percent,
+        });
+      }
+    }
+
+    const result = topLevel.map((top) => {
+      const bucket = agg.get(top.id);
+      const m = this.calcFromWorkloads(bucket?.workloads || []);
+      return {
+        department_id: top.id,
+        department_name: top.name,
+        employees_count: bucket ? bucket.employeesSet.size : 0,
+        avg_workload: Math.round(m.avgWorkload),
+        efficiency: Math.round(m.efficiency),
+        tasks_completed: m.completed,
+        tasks_overdue: m.overdue,
+      };
+    });
+
+    return { week_analyzed: week, departments: result };
+  }
+
+  /* ===================== RISKS REPORT ===================== */
+  async generateRisksReport() {
+    const week = await this.getLatestWeek();
+    const employees = await db.Employee.findAll({
+      where: { is_active: true },
+      include: [
+        {
+          model: db.WorkloadEntry,
+          as: "workloads",
+          where: { week_start_date: week },
+          required: false,
+        },
+        { model: db.Department, as: "department" },
+      ],
+    });
+
+    const risks = [];
+    for (const e of employees) {
+      const m = this.calcFromWorkloads(e.workloads || []);
+      if (m.avgWorkload > 85) {
+        risks.push({
+          type: "Перегрузка",
+          employee: e.full_name,
+          department: e.department?.name || "—",
+          value: Math.round(m.avgWorkload),
+          recommendation: "Перераспределить задачи или ресурсы",
+        });
+      }
+      if (m.totalTasks > 0 && m.efficiency < 60) {
+        risks.push({
+          type: "Низкая эффективность",
+          employee: e.full_name,
+          department: e.department?.name || "—",
+          value: Math.round(m.efficiency),
+          recommendation: "Провести one-to-one или обучение",
+        });
+      }
+    }
+
+    return {
+      metadata: {
+        report_type: "risks",
+        generated_at: new Date().toISOString(),
+        total_records: risks.length,
+      },
+      data: risks,
+    };
+  }
+
+  /* ===================== EMPLOYEES REPORT ===================== */
+  async generateEmployeesReport() {
+    const week = await this.getLatestWeek();
+    const employees = await db.Employee.findAll({
+      where: { is_active: true },
+      include: [
+        { model: db.Department, as: "department" },
+        { model: db.Position, as: "position" },
+        {
+          model: db.WorkloadEntry,
+          as: "workloads",
+          where: { week_start_date: week },
+          required: false,
+        },
+      ],
+    });
+
+    const data = employees.map((e) => {
+      const m = this.calcFromWorkloads(e.workloads || []);
+      return {
+        id: e.id,
+        full_name: e.full_name,
+        department: e.department?.name || "—",
+        position: e.position?.name || "—",
+        email: e.email || "—",
+        phone: e.phone || "—",
+        hire_date: e.hire_date
+          ? new Date(e.hire_date).toISOString().split("T")[0]
+          : "—",
+        is_active: e.is_active ? "Да" : "Нет",
+        avg_workload: Math.round(m.avgWorkload),
+        tasks_completed: m.completed,
+        tasks_overdue: m.overdue,
+        efficiency: Math.round(m.efficiency),
+      };
     });
 
     return {
       metadata: {
         report_type: "employees",
         generated_at: new Date().toISOString(),
-        filters,
-        total_records: employees.length,
+        total_records: data.length,
       },
-      data: formattedData,
+      data,
     };
   }
 
-  // ==================== ОТЧЕТ ПО ЗАГРУЗКЕ ====================
-
-  async generateWorkloadReport(filters = {}) {
-    const {
-      date_from = this.getCurrentMonthStart(),
-      date_to = new Date(),
-      department_ids = [],
-      project_ids = [],
-    } = filters;
-
-    const where = {
-      week_start_date: { [Op.between]: [date_from, date_to] },
-    };
-
-    if (project_ids.length > 0) {
-      where.project_id = { [Op.in]: project_ids };
-    }
-
-    const include = [
-      {
-        model: db.Employee,
-        as: "employee",
-        include: [
-          { model: db.Department, as: "department" },
-          { model: db.Position, as: "position" },
-        ],
-      },
-      {
-        model: db.Project,
-        as: "project",
-      },
-    ];
-
-    if (department_ids.length > 0) {
-      include[0].where = {
-        department_id: { [Op.in]: department_ids },
-      };
-    }
-
-    const workloads = await db.WorkloadEntry.findAll({
-      where,
-      include,
-      order: [
-        ["week_start_date", "DESC"],
-        ["employee_id", "ASC"],
+  /* ===================== WORKLOAD REPORT ===================== */
+  async generateWorkloadReport() {
+    const week = await this.getLatestWeek();
+    const entries = await db.WorkloadEntry.findAll({
+      where: { week_start_date: week },
+      include: [
+        {
+          model: db.Employee,
+          as: "employee",
+          include: [
+            { model: db.Department, as: "department" },
+            { model: db.Position, as: "position" },
+          ],
+        },
+        { model: db.Project, as: "project" },
       ],
     });
 
-    // Группируем по сотрудникам
-    const employeeMap = new Map();
-
-    workloads.forEach((entry) => {
+    const map = new Map();
+    for (const entry of entries) {
       const empId = entry.employee_id;
-      if (!employeeMap.has(empId)) {
-        employeeMap.set(empId, {
-          employee: {
-            id: entry.employee.id,
-            full_name: entry.employee.full_name,
-            department: entry.employee.department?.name,
-            position: entry.employee.position?.name,
-          },
+      if (!map.has(empId))
+        map.set(empId, {
+          employee: entry.employee,
           projects: [],
           total_workload: 0,
           total_completed: 0,
           total_overdue: 0,
           weeks_count: 0,
         });
-      }
-
-      const empData = employeeMap.get(empId);
-      empData.projects.push({
-        project: entry.project.name,
-        week: entry.week_start_date,
+      const emp = map.get(empId);
+      emp.projects.push({
+        project: entry.project?.name,
         workload: entry.workload_percent,
         completed: entry.tasks_completed,
         overdue: entry.tasks_overdue,
       });
+      emp.total_workload += entry.workload_percent || 0;
+      emp.total_completed += entry.tasks_completed || 0;
+      emp.total_overdue += entry.tasks_overdue || 0;
+      emp.weeks_count++;
+    }
 
-      empData.total_workload += entry.workload_percent || 0;
-      empData.total_completed += entry.tasks_completed || 0;
-      empData.total_overdue += entry.tasks_overdue || 0;
-      empData.weeks_count++;
-    });
-
-    const result = Array.from(employeeMap.values()).map((emp) => ({
-      ...emp,
+    const data = Array.from(map.values()).map((emp) => ({
+      employee: emp.employee,
+      projects: emp.projects,
       avg_workload: Math.round(emp.total_workload / emp.weeks_count),
+      total_completed: emp.total_completed,
+      total_overdue: emp.total_overdue,
       efficiency:
         emp.total_completed + emp.total_overdue > 0
           ? Math.round(
@@ -220,307 +320,139 @@ class ReportService {
       metadata: {
         report_type: "workload",
         generated_at: new Date().toISOString(),
-        period: { date_from, date_to },
-        filters,
-        total_records: result.length,
+        total_records: data.length,
       },
-      data: result,
+      data,
     };
   }
 
-  // ==================== ЭКСПОРТ В EXCEL (В ПАМЯТИ) ====================
-
+  /* ===================== EXCEL EXPORT ===================== */
   async exportToExcel(reportData, reportType) {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Employee Analytics System";
-    workbook.created = new Date();
+    const ws = workbook.addWorksheet("Отчет");
 
-    const worksheet = workbook.addWorksheet("Отчет");
-
-    // Определяем колонки в зависимости от типа отчета
     let columns = [];
-    let dataRows = [];
+    let rows = [];
 
-    if (reportType === "employees") {
-      columns = [
-        { header: "ID", key: "id", width: 10 },
-        { header: "ФИО", key: "full_name", width: 25 },
-        { header: "Отдел", key: "department", width: 20 },
-        { header: "Должность", key: "position", width: 20 },
-        { header: "Email", key: "email", width: 25 },
-        { header: "Телефон", key: "phone", width: 15 },
-        { header: "Дата приема", key: "hire_date", width: 12 },
-        { header: "Статус", key: "is_active", width: 10 },
-      ];
-
-      if (reportData.data[0]?.avg_workload !== undefined) {
-        columns.push(
-          { header: "Загрузка %", key: "avg_workload", width: 12 },
-          { header: "Выполнено", key: "tasks_completed", width: 12 },
-          { header: "Просрочено", key: "tasks_overdue", width: 12 },
-          { header: "Эффективность %", key: "efficiency", width: 15 },
-        );
-      }
-
-      dataRows = reportData.data;
+    if (reportType === "employees" || reportType === "kpi") {
+      columns = Object.keys(reportData.data[0] || {}).map((k) => ({
+        header: k,
+        key: k,
+      }));
+      rows = reportData.data;
     } else if (reportType === "workload") {
       columns = [
-        { header: "Сотрудник", key: "employee_name", width: 25 },
-        { header: "Отдел", key: "department", width: 20 },
-        { header: "Должность", key: "position", width: 20 },
-        { header: "Ср. загрузка %", key: "avg_workload", width: 15 },
-        { header: "Выполнено задач", key: "total_completed", width: 15 },
-        { header: "Просрочено задач", key: "total_overdue", width: 15 },
-        { header: "Эффективность %", key: "efficiency", width: 15 },
-        { header: "Проектов", key: "projects_count", width: 12 },
-      ];
+        "Сотрудник",
+        "Отдел",
+        "Должность",
+        "Ср. загрузка %",
+        "Выполнено задач",
+        "Просрочено задач",
+        "Эффективность %",
+        "Проекты",
+      ].map((h) => ({ header: h, key: h }));
 
-      dataRows = reportData.data.map((item) => ({
-        employee_name: item.employee.full_name,
-        department: item.employee.department,
-        position: item.employee.position,
-        avg_workload: item.avg_workload,
-        total_completed: item.total_completed,
-        total_overdue: item.total_overdue,
-        efficiency: item.efficiency,
-        projects_count: item.projects_count,
+      rows = reportData.data.map((e) => ({
+        Сотрудник: e.employee.full_name,
+        Отдел: e.employee.department?.name || "—",
+        Должность: e.employee.position?.name || "—",
+        "Ср. загрузка %": e.avg_workload,
+        "Выполнено задач": e.total_completed,
+        "Просрочено задач": e.total_overdue,
+        "Эффективность %": e.efficiency,
+        Проекты: e.projects.map((p) => p.project).join(", "),
       }));
+    } else {
+      rows = reportData.data || reportData.departments || [];
+      if (rows.length)
+        columns = Object.keys(rows[0]).map((k) => ({
+          header: k,
+          key: k,
+        }));
     }
 
-    // Добавляем заголовки
-    worksheet.columns = columns;
-
-    // Стиль для заголовков
-    const headerRow = worksheet.getRow(1);
-    headerRow.font = { bold: true, size: 12 };
-    headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFE0E0E0" },
+    ws.columns = columns;
+    ws.columns.forEach((c) => (c.width = 25));
+    ws.getRow(1).font = { bold: true };
+    ws.autoFilter = {
+      from: "A1",
+      to: `${String.fromCharCode(65 + ws.columns.length - 1)}1`,
     };
-    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    rows.forEach((r) => ws.addRow(r));
 
-    // Добавляем данные
-    dataRows.forEach((row, index) => {
-      worksheet.addRow(row);
-
-      // Чередующаяся заливка строк
-      const currentRow = worksheet.getRow(index + 2);
-      if (index % 2 === 0) {
-        currentRow.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFF5F5F5" },
-        };
-      }
-    });
-
-    // Автонастройка ширины
-    worksheet.columns.forEach((column) => {
-      let maxLength = 0;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const cellLength = cell.value ? cell.value.toString().length : 0;
-        if (cellLength > maxLength) {
-          maxLength = cellLength;
-        }
-      });
-      column.width = Math.min(maxLength + 2, column.width || 30);
-    });
-
-    // Добавляем метаданные
-    const metaSheet = workbook.addWorksheet("Метаданные");
-    metaSheet.addRow(["Тип отчета:", reportData.metadata.report_type]);
-    metaSheet.addRow(["Дата генерации:", reportData.metadata.generated_at]);
-    metaSheet.addRow(["Всего записей:", reportData.metadata.total_records]);
-
-    if (reportData.metadata.filters) {
-      metaSheet.addRow([""]);
-      metaSheet.addRow(["Фильтры:"]);
-      Object.entries(reportData.metadata.filters).forEach(([key, value]) => {
-        if (value && (Array.isArray(value) ? value.length > 0 : true)) {
-          metaSheet.addRow([
-            `  ${key}:`,
-            Array.isArray(value) ? value.join(", ") : value,
-          ]);
-        }
-      });
-    }
-
-    // Генерируем в буфер (память)
     const buffer = await workbook.xlsx.writeBuffer();
-
     return {
-      buffer: buffer,
+      buffer,
       fileName: `report_${reportType}_${new Date().toISOString().split("T")[0]}.xlsx`,
       mimeType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     };
   }
 
-  // ==================== ЭКСПОРТ В PDF (В ПАМЯТИ) ====================
-
+  /* ===================== PDF EXPORT ===================== */
   async exportToPDF(reportData, reportType) {
     return new Promise(async (resolve, reject) => {
       try {
         const chunks = [];
+        const doc = new PDFDocument({ margin: 30, size: "A4" });
+        const fontPath = path.join(__dirname, "fonts/Roboto-Regular.ttf");
+        const fontBoldPath = path.join(__dirname, "fonts/Roboto-Bold.ttf");
+        doc.registerFont("Roboto", fontPath);
+        doc.registerFont("Roboto-Bold", fontBoldPath);
 
-        // Создаем документ
-        const doc = new PDFDocument({
-          margin: 50,
-          size: "A4",
-          info: {
-            Title: `Отчет: ${this.getReportTitle(reportType)}`,
-            Author: "Employee Analytics System",
-            CreationDate: new Date(),
-          },
-        });
-
-        // ========== РЕГИСТРАЦИЯ ШРИФТОВ ==========
-        const fontsDir = path.join(__dirname, "./fonts");
-
-        console.log(fontsDir)
-
-        // Проверяем наличие кастомных шрифтов
-        const robotoRegular = path.join(fontsDir, "Roboto-Regular.ttf");
-        const robotoBold = path.join(fontsDir, "Roboto-Bold.ttf");
-
-        if (fs.existsSync(robotoRegular)) {
-          // Используем кастомный шрифт с кириллицей
-          doc.registerFont("Roboto", robotoRegular);
-          doc.registerFont("Roboto-Bold", robotoBold || robotoRegular);
-          doc.font("Roboto");
-          console.log("Используем шрифт Roboto для кириллицы");
-        } else {
-          // Fallback: пробуем стандартные шрифты
-          try {
-            // Helvetica может работать в некоторых версиях
-            doc.font("Helvetica");
-            console.log(
-              "Используем Helvetica (возможны проблемы с кириллицей)",
-            );
-          } catch (e) {
-            // Последний вариант
-            doc.font("Courier");
-            console.log("Используем Courier (базовый шрифт)");
-          }
-        }
-
-        doc.on("data", (chunk) => chunks.push(chunk));
-        doc.on("end", () => {
-          const buffer = Buffer.concat(chunks);
+        doc.on("data", (c) => chunks.push(c));
+        doc.on("end", () =>
           resolve({
-            buffer: buffer,
+            buffer: Buffer.concat(chunks),
             fileName: `report_${reportType}_${new Date().toISOString().split("T")[0]}.pdf`,
             mimeType: "application/pdf",
-          });
-        });
+          }),
+        );
         doc.on("error", reject);
 
-        // ========== ЗАГОЛОВОК ==========
-        doc.fontSize(20);
-        if (doc._font) {
-          doc.text("Отчет по системе аналитики", { align: "center" });
-        } else {
-          // Если шрифт не загрузился - английский текст
-          doc.text("Analytics Report", { align: "center" });
-        }
-        doc.moveDown();
-
-        // ========== МЕТАДАННЫЕ ==========
-        doc.fontSize(12);
-        const title = doc._font
-          ? `Тип отчета: ${this.getReportTitle(reportType)}`
-          : `Report type: ${reportType}`;
-
-        doc.text(title);
-        doc.text(`Дата генерации: ${new Date().toLocaleString("ru-RU")}`);
-        doc.text(`Всего записей: ${reportData.metadata.total_records}`);
-        doc.moveDown();
-
-        // ========== ТАБЛИЦА ==========
-        if (reportType === "employees" && reportData.data.length > 0) {
-          // Простая таблица для теста
-          const startY = doc.y;
-          const startX = 50;
-          const colWidths = [150, 100, 100, 150];
-
-          // Заголовки
-          if (doc._font) {
-            doc
-              .fontSize(10)
-              .font("Roboto-Bold" || "Helvetica-Bold" || "Courier-Bold");
-          }
-
-          const headers = doc._font
-            ? ["ФИО", "Отдел", "Должность", "Email"]
-            : ["Name", "Department", "Position", "Email"];
-
-          headers.forEach((header, i) => {
-            doc.text(
-              header,
-              startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0),
-              startY,
-              { width: colWidths[i], continued: false },
-            );
+        doc
+          .font("Roboto-Bold")
+          .fontSize(18)
+          .text(`Отчет: ${this.getReportTitle(reportType)}`, {
+            align: "center",
           });
+        doc.moveDown();
+        doc
+          .font("Roboto")
+          .fontSize(12)
+          .text(`Дата генерации: ${new Date().toLocaleString("ru-RU")}`);
+        doc.moveDown();
 
-          doc.moveDown(1);
+        let rows = reportData.data || reportData.departments || [];
+        if (!rows.length) {
+          doc.text("Нет данных для отчета", { align: "center" });
+          doc.end();
+          return;
+        }
 
-          // Данные
-          if (doc._font) {
-            doc.fontSize(10).font("Roboto" || "Helvetica" || "Courier");
-          }
-
-          const rows = reportData.data.slice(0, 20).map((emp) => ({
-            name: emp.full_name || "",
-            dept: emp.department || "—",
-            pos: emp.position || "—",
-            email: emp.email || "—",
+        if (reportType === "workload") {
+          rows = rows.map((e) => ({
+            Сотрудник: e.employee.full_name,
+            Отдел: e.employee.department?.name || "—",
+            Должность: e.employee.position?.name || "—",
+            "Ср. загрузка %": e.avg_workload,
+            "Выполнено задач": e.total_completed,
+            "Просрочено задач": e.total_overdue,
+            "Эффективность %": e.efficiency,
+            Проекты: e.projects.map((p) => p.project).join(", "),
           }));
-
-          rows.forEach((row, rowIndex) => {
-            const y = doc.y;
-            const fields = [row.name, row.dept, row.pos, row.email];
-
-            fields.forEach((cell, cellIndex) => {
-              doc.text(
-                cell.toString(),
-                startX +
-                  colWidths.slice(0, cellIndex).reduce((a, b) => a + b, 0),
-                y,
-                { width: colWidths[cellIndex] },
-              );
-            });
-
-            doc.moveDown(1);
-
-            // Линия-разделитель
-            if (rowIndex < rows.length - 1) {
-              doc
-                .moveTo(startX, doc.y - 5)
-                .lineTo(
-                  startX + colWidths.reduce((a, b) => a + b, 0),
-                  doc.y - 5,
-                )
-                .stroke();
-              doc.moveDown(0.5);
-            }
-          });
         }
 
-        // ========== ПОДВАЛ ==========
-        doc.moveDown(2);
-        doc.fontSize(10);
-
-        if (doc._font) {
-          doc.text("Сгенерировано системой учета сотрудников", {
-            align: "center",
-          });
-        } else {
-          doc.text("Generated by Employee Analytics System", {
-            align: "center",
-          });
-        }
+        const headers = Object.keys(rows[0]);
+        this._drawAdaptiveTable(
+          doc,
+          headers,
+          rows,
+          30,
+          doc.y + 20,
+          doc.page.width - 60,
+        );
 
         doc.end();
       } catch (error) {
@@ -529,68 +461,62 @@ class ReportService {
     });
   }
 
-  // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+  _drawAdaptiveTable(doc, headers, rows, startX, startY, pageWidth) {
+    const rowPadding = 4;
+    const colCount = headers.length;
+    const colWidth = (pageWidth - (colCount - 1) * 2) / colCount;
+    let y = startY;
 
-  getCurrentMonthStart() {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
+    headers.forEach((h, i) => {
+      const x = startX + i * colWidth;
+      doc.rect(x, y, colWidth, 20).fillAndStroke("#f0f0f0", "#000");
+      doc
+        .fillColor("#000")
+        .font("Roboto-Bold")
+        .text(h, x + 2, y + 4, { width: colWidth - 4 });
+    });
+    y += 20;
+
+    rows.forEach((row, rowIndex) => {
+      const cellHeights = headers.map(
+        (h, i) =>
+          doc.heightOfString(row[h]?.toString() || "—", {
+            width: colWidth - 4,
+          }) +
+          rowPadding * 2,
+      );
+      const rowHeight = Math.max(...cellHeights);
+
+      if (y + rowHeight > doc.page.height - 40) {
+        doc.addPage();
+        y = 50;
+      }
+
+      headers.forEach((h, i) => {
+        const x = startX + i * colWidth;
+        const fillColor = rowIndex % 2 === 0 ? "#ffffff" : "#f9f9f9";
+        doc.rect(x, y, colWidth, rowHeight).fillAndStroke(fillColor, "#000");
+        doc
+          .fillColor("#000")
+          .font("Roboto")
+          .text(row[h]?.toString() || "—", x + 2, y + rowPadding, {
+            width: colWidth - 4,
+          });
+      });
+
+      y += rowHeight;
+    });
   }
 
-  getReportTitle(reportType) {
+  getReportTitle(type) {
     const titles = {
       employees: "Сотрудники",
       workload: "Загрузка сотрудников",
-      projects: "Проекты",
-      kpi: "KPI и эффективность",
+      kpi: "KPI",
+      departments: "Отделы",
+      risks: "Риски",
     };
-    return titles[reportType] || "Отчет";
-  }
-
-  generatePDFTable(doc, headers, rows) {
-    const startX = 50;
-    let startY = doc.y;
-    const rowHeight = 20;
-    const colWidths = [150, 100, 100, 150];
-
-    // Заголовки таблицы
-    doc.font("Helvetica-Bold");
-    headers.forEach((header, i) => {
-      doc.text(
-        header,
-        startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0),
-        startY,
-        {
-          width: colWidths[i],
-          align: "left",
-        },
-      );
-    });
-
-    // Линия под заголовками
-    startY += rowHeight;
-    doc
-      .moveTo(startX, startY)
-      .lineTo(startX + colWidths.reduce((a, b) => a + b, 0), startY)
-      .stroke();
-
-    // Данные
-    doc.font("Helvetica");
-    rows.forEach((row, rowIndex) => {
-      const y = startY + rowIndex * rowHeight;
-      row.forEach((cell, cellIndex) => {
-        doc.text(
-          cell || "—",
-          startX + colWidths.slice(0, cellIndex).reduce((a, b) => a + b, 0),
-          y,
-          {
-            width: colWidths[cellIndex],
-            align: "left",
-          },
-        );
-      });
-    });
-
-    doc.y = startY + rows.length * rowHeight + 20;
+    return titles[type] || "Отчет";
   }
 }
 

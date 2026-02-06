@@ -10,6 +10,10 @@ router.get("/employees", reportController.getEmployeesReport);
 // Отчет по загрузке (JSON для UI)
 router.get("/workload", reportController.getWorkloadReport);
 
+router.get("/kpi", reportController.getKPIReport);
+router.get("/departments", reportController.getDepartmentsReport);
+router.get("/risks", reportController.getRisksReport);
+
 // ==================== ЭКСПОРТ ОТЧЕТОВ ====================
 
 // Экспорт отчета с фильтрами

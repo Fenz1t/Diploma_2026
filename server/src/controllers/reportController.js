@@ -5,6 +5,33 @@ const path = require("path");
 class ReportController {
   // ==================== ПРОСМОТР ОТЧЕТОВ ====================
 
+  async getKPIReport(req, res) {
+    try {
+      const report = await reportService.generateKPIReport(req.query);
+      res.json({ success: true, data: report });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
+  async getDepartmentsReport(req, res) {
+    try {
+      const report = await reportService.generateDepartmentsReport();
+      res.json({ success: true, data: report });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
+  async getRisksReport(req, res) {
+    try {
+      const report = await reportService.generateRisksReport();
+      res.json({ success: true, data: report });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
   async getEmployeesReport(req, res) {
     try {
       const filters = {
@@ -64,7 +91,6 @@ class ReportController {
   }
 
   // ==================== ЭКСПОРТ ОТЧЕТОВ ====================
-
   async exportReport(req, res) {
     try {
       const { report_type } = req.params;
@@ -72,10 +98,18 @@ class ReportController {
 
       console.log("📤 Export request:", { report_type, format, filters });
 
-      if (!["employees", "workload", "projects"].includes(report_type)) {
+      // Расширяем список поддерживаемых типов
+      const supportedTypes = [
+        "employees",
+        "workload",
+        "kpi",
+        "departments",
+        "risks",
+      ];
+      if (!supportedTypes.includes(report_type)) {
         return res.status(400).json({
           success: false,
-          error: "Неподдерживаемый тип отчета",
+          error: `Неподдерживаемый тип отчета. Доступные: ${supportedTypes.join(", ")}`,
         });
       }
 
@@ -88,19 +122,31 @@ class ReportController {
 
       // Генерируем данные отчета
       let reportData;
-      if (report_type === "employees") {
-        reportData = await reportService.generateEmployeesReport(filters);
-      } else if (report_type === "workload") {
-        reportData = await reportService.generateWorkloadReport(filters);
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: "Отчет по проектам пока не реализован",
-        });
+      switch (report_type) {
+        case "employees":
+          reportData = await reportService.generateEmployeesReport(filters);
+          break;
+        case "workload":
+          reportData = await reportService.generateWorkloadReport(filters);
+          break;
+        case "kpi":
+          reportData = await reportService.generateKPIReport(filters);
+          break;
+        case "departments":
+          reportData = await reportService.generateDepartmentsReport();
+          break;
+        case "risks":
+          reportData = await reportService.generateRisksReport();
+          break;
+        default:
+          return res.status(400).json({
+            success: false,
+            error: "Тип отчета не реализован",
+          });
       }
 
       console.log(
-        `📊 Report data generated: ${reportData.data.length} records`,
+        `📊 Report data generated: ${reportData.data?.length || reportData.departments?.length || 0} records`,
       );
 
       // Экспортируем в нужный формат
@@ -120,7 +166,7 @@ class ReportController {
         `✅ Export successful: ${exportResult.fileName}, size: ${exportResult.buffer?.length || 0} bytes`,
       );
 
-      // Отправляем файл ИЗ БУФЕРА (без сохранения на диск)
+      // Отправляем файл
       res.setHeader("Content-Type", exportResult.mimeType);
       res.setHeader(
         "Content-Disposition",
@@ -136,13 +182,10 @@ class ReportController {
     }
   }
 
-  // ==================== БЫСТРЫЙ ЭКСПОРТ ====================
-
   async quickExport(req, res) {
     try {
       const { type, format } = req.query;
-
-      console.log("Quick export params:", { type, format }); // ← ДЛЯ ДЕБАГА
+      console.log("Quick export params:", { type, format });
 
       if (!type || !format) {
         return res.status(400).json({
@@ -151,17 +194,39 @@ class ReportController {
         });
       }
 
-      // Простой отчет
-      let reportData;
-      if (type === "employees") {
-        reportData = await reportService.generateEmployeesReport({});
-      } else if (type === "workload") {
-        reportData = await reportService.generateWorkloadReport({});
-      } else {
+      // Расширяем список поддерживаемых типов
+      const supportedTypes = [
+        "employees",
+        "workload",
+        "kpi",
+        "departments",
+        "risks",
+      ];
+      if (!supportedTypes.includes(type)) {
         return res.status(400).json({
           success: false,
-          error: "Неподдерживаемый тип отчета",
+          error: `Неподдерживаемый тип отчета. Доступные: ${supportedTypes.join(", ")}`,
         });
+      }
+
+      // Простой отчет
+      let reportData;
+      switch (type) {
+        case "employees":
+          reportData = await reportService.generateEmployeesReport({});
+          break;
+        case "workload":
+          reportData = await reportService.generateWorkloadReport({});
+          break;
+        case "kpi":
+          reportData = await reportService.generateKPIReport({});
+          break;
+        case "departments":
+          reportData = await reportService.generateDepartmentsReport();
+          break;
+        case "risks":
+          reportData = await reportService.generateRisksReport();
+          break;
       }
 
       let exportResult;

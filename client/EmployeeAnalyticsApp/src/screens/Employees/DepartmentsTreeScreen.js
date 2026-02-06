@@ -24,7 +24,6 @@ const DepartmentsTreeScreen = ({ navigation }) => {
   const [dialogVisible, setDialogVisible] = useState(false);
   const [editingDept, setEditingDept] = useState(null);
 
-  // ✅ Показываем только корни (parent_id === null) — у тебя это "Руководство"
   const roots = useMemo(() => tree.filter((d) => d.parent_id === null), [tree]);
 
   const toggle = (id) => {
@@ -43,7 +42,6 @@ const DepartmentsTreeScreen = ({ navigation }) => {
     });
   };
 
-  // ✅ ВОТ ТУТ ВМЕСТО БАГНУТОГО MENU — ALERT
   const openMenu = (dept) => {
     Alert.alert(
       dept.name,
