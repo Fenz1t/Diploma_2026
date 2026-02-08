@@ -13,9 +13,9 @@ import PositionFormScreen from "../screens/Positions/PositionFormScreen";
 import ProjectsScreen from "../screens/Projects/ProjectsScreen";
 import ProjectFormScreen from "../screens/Projects/ProjectFormScreen";
 // Сотрудники+Отделы
-
 import DepartmentsTreeScreen from "../screens/Employees/DepartmentsTreeScreen";
 import DepartmentEmployeesScreen from "../screens/Employees/DepartmentEmployeesScreen";
+import EmployeeDetailsScreen from "../screens/Employees/EmployeeDetailsScreen";
 import PositionEmployeesScreen from "../screens/Positions/PositionEmployeesScreen";
 import ReportViewerScreen from "../screens/Reports/ReportViewerScreen";
 import ReportsListScreen from "../screens/Reports/ReportsListScreen";
@@ -37,7 +37,6 @@ const PositionsStack = () => (
       }}
     />
 
-    {/* ⬇️ ВОТ ЭТО НОВОЕ */}
     <Stack.Screen
       name="PositionEmployees"
       component={PositionEmployeesScreen}
@@ -67,6 +66,7 @@ const EmployeesStack = () => (
       name="DepartmentEmployees"
       component={DepartmentEmployeesScreen}
     />
+    <Stack.Screen name="EmployeeDetails" component={EmployeeDetailsScreen} />
   </Stack.Navigator>
 );
 const ReportsStack = () => (

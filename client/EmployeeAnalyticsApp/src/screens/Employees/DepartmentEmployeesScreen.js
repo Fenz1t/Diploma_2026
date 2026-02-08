@@ -80,6 +80,9 @@ const DepartmentEmployeesScreen = ({ route, navigation }) => {
               employee={item}
               onEdit={() => {}}
               onDelete={() => {}}
+              onPress={() =>
+                navigation.navigate("EmployeeDetails", { employeeId: item.id })
+              }
             />
           )}
           ListEmptyComponent={<Text style={styles.empty}>Сотрудников нет</Text>}

@@ -1,14 +1,24 @@
 import React, { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Card, Text, Avatar, IconButton, Menu } from "react-native-paper";
+import { API_BASE_URL } from "../../services/api/client";
 
-const EmployeeCard = ({ employee, onEdit, onDelete }) => {
+const EmployeeCard = ({ employee, onEdit, onDelete, onPress }) => {
   const [menuVisible, setMenuVisible] = useState(false);
 
+  const hasPhoto = !!employee?.photo_url;
+  const baseUrl = API_BASE_URL.replace(/\/api$/, "");
+  const photoUrl = hasPhoto ? `${baseUrl}${employee.photo_url}` : null;
+
   return (
-    <Card style={styles.card}>
+    <Card style={styles.card} onPress={onPress}>
       <Card.Content style={styles.content}>
-        <Avatar.Icon size={40} icon="account" />
+        {hasPhoto ? (
+          <Avatar.Image size={40} source={{ uri: photoUrl }} />
+        ) : (
+          <Avatar.Icon size={40} icon="account" />
+        )}
+
         <View style={styles.info}>
           <Text style={styles.name}>{employee.full_name}</Text>
           <Text style={styles.position}>

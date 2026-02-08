@@ -357,6 +357,24 @@ class AnalyticsService {
 
     const m = this.calcFromWorkloads(workloads);
 
+    // KPI история (эффективность)
+    const KpiModel =
+      db.KPIMetric || db.KpiMetric || db.Kpi_Metric || db.kpi_metric;
+
+    let kpiHistory = [];
+    if (KpiModel) {
+      const rows = await KpiModel.findAll({
+        where: { employee_id: employeeId, metric_name: "efficiency" },
+        order: [["period", "ASC"]],
+        raw: true,
+      });
+
+      kpiHistory = rows.map((r) => ({
+        period: r.period,
+        value: Number(r.metric_value ?? r.value ?? 0),
+      }));
+    }
+
     return {
       current_week: {
         workload: Math.round(m.avgWorkload),
@@ -366,6 +384,7 @@ class AnalyticsService {
         task_completion_rate: m.totalTasks > 0 ? Math.round(m.efficiency) : 0,
         active_projects: new Set(workloads.map((w) => w.project_id)).size,
       },
+      kpi_history: kpiHistory,
       projects: workloads.map((w) => ({
         name: w.project?.name || "Проект",
         workload_share: Number(w.workload_percent || 0),

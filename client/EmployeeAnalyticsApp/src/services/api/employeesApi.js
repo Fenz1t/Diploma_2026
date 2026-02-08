@@ -21,4 +21,10 @@ export const employeesApi = {
     const response = await apiClient.get(`/employees/${id}`);
     return response.data.data;
   },
+
+  // Обновление сотрудника
+  update: async (id, payload) => {
+    const response = await apiClient.put(`/employees/${id}`, payload);
+    return response.data.data;
+  },
 };

@@ -1,6 +1,7 @@
 import axios from "axios";
 
-const API_BASE_URL = "https://carefully-permanent-capybara.cloudpub.ru/api";
+export const API_BASE_URL =
+  "https://carefully-permanent-capybara.cloudpub.ru/api";
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
