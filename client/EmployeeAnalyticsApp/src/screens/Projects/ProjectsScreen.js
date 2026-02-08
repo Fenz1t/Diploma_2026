@@ -156,7 +156,7 @@ const ProjectsScreen = ({ navigation }) => {
 
   // Просмотр деталей
   const handleViewDetails = (project) => {
-    navigation.navigate("ProjectDetails", { projectId: project.id });
+    navigation.navigate("ProjectDetailsScreen", { projectId: project.id });
   };
 
   // Создание нового проекта

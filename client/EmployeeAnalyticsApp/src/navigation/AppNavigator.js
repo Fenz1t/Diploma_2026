@@ -12,6 +12,8 @@ import PositionFormScreen from "../screens/Positions/PositionFormScreen";
 // Проекты
 import ProjectsScreen from "../screens/Projects/ProjectsScreen";
 import ProjectFormScreen from "../screens/Projects/ProjectFormScreen";
+import ProjectDetailsScreen from "../screens/Projects/ProjectDetailsScreen";
+
 // Сотрудники+Отделы
 import DepartmentsTreeScreen from "../screens/Employees/DepartmentsTreeScreen";
 import DepartmentEmployeesScreen from "../screens/Employees/DepartmentEmployeesScreen";
@@ -56,6 +58,11 @@ const ProjectsStack = () => (
         headerShown: true,
         title: "Проект",
       }}
+    />
+    <Stack.Screen
+      name="ProjectDetailsScreen"
+      component={ProjectDetailsScreen}
+      options={{ headerShown: false }}
     />
   </Stack.Navigator>
 );
@@ -180,6 +187,11 @@ const AppNavigator = () => {
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="MainTabs" component={MainTabs} />
+        <Stack.Screen
+          name="EmployeeDetails"
+          component={EmployeeDetailsScreen}
+          options={{ headerShown: false, title: "Сотрудник" }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

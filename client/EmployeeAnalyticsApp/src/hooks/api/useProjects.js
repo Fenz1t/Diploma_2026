@@ -147,3 +147,33 @@ export const useUpdateProjectStatus = () => {
     },
   });
 };
+
+export const useProjectEmployees = (projectId) => {
+  return useQuery({
+    queryKey: ["projectEmployees", projectId],
+    queryFn: () => projectApi.getProjectEmployees(projectId),
+    enabled: !!projectId,
+  });
+};
+
+export const useAddProjectEmployee = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, employeeId }) =>
+      projectApi.addEmployeeToProject(projectId, employeeId),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries(["projectEmployees", vars.projectId]);
+    },
+  });
+};
+
+export const useRemoveProjectEmployee = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, employeeId }) =>
+      projectApi.removeEmployeeFromProject(projectId, employeeId),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries(["projectEmployees", vars.projectId]);
+    },
+  });
+};

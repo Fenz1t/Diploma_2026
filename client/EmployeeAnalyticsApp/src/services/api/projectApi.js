@@ -50,4 +50,23 @@ export const projectApi = {
     });
     return response.data.data;
   },
+  // Логика с сотрудниками
+  getProjectEmployees: async (id) => {
+    const response = await apiClient.get(`/projects/${id}/employees`);
+    return response.data.data;
+  },
+
+  addEmployeeToProject: async (id, employeeId) => {
+    const response = await apiClient.post(`/projects/${id}/employees`, {
+      employee_id: employeeId,
+    });
+    return response.data.data;
+  },
+
+  removeEmployeeFromProject: async (id, employeeId) => {
+    const response = await apiClient.delete(
+      `/projects/${id}/employees/${employeeId}`,
+    );
+    return response.data.data;
+  },
 };
