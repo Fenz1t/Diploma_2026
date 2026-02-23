@@ -35,6 +35,12 @@ const DepartmentEmployeesScreen = ({ route, navigation }) => {
       <Appbar.Header>
         <Appbar.BackAction onPress={navigation.goBack} />
         <Appbar.Content title={departmentName} />
+        <Appbar.Action
+          icon="account-plus"
+          onPress={() =>
+            navigation.navigate("EmployeeForm", { departmentId: departmentId })
+          }
+        />
         <Appbar.Action icon="refresh" onPress={refetch} />
       </Appbar.Header>
 
