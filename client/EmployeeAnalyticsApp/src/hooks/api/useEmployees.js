@@ -22,14 +22,26 @@ export const useEmployeeById = (employeeId) => {
   });
 };
 
+export const useCreateEmployee = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload) => employeesApi.create(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employeesByDepartment"] });
+      queryClient.invalidateQueries({ queryKey: ["employee"] });
+    },
+  });
+};
+
 export const useUpdateEmployee = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({ id, payload }) => employeesApi.update(id, payload),
     onSuccess: (data) => {
-      queryClient.invalidateQueries(["employee", data?.id]);
-      queryClient.invalidateQueries(["employeesByDepartment"]);
+      queryClient.invalidateQueries({ queryKey: ["employee", data?.id] });
+      queryClient.invalidateQueries({ queryKey: ["employeesByDepartment"] });
     },
   });
 };
