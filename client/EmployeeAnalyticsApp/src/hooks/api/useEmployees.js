@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { employeesApi } from "../../services/api/employeesApi";
+import { Alert } from "react-native";
 
 export const useEmployeesByDepartment = (
   departmentId,
@@ -19,6 +20,40 @@ export const useEmployeeById = (employeeId) => {
     queryFn: () => employeesApi.getById(employeeId),
     enabled: !!employeeId,
     staleTime: 5 * 60 * 1000,
+  });
+};
+
+export const useCreateEmployee = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload) => employeesApi.create(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employeesByDepartment"] });
+      queryClient.invalidateQueries({ queryKey: ["employee"] });
+    },
+  });
+};
+
+export const useDeleteEmployee = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id) => employeesApi.delete(id),
+    onSuccess: (_, deletedId) => {
+      // Инвалидируем все запросы сотрудников после удаления
+      queryClient.invalidateQueries({ queryKey: ["employeesByDepartment"] });
+      queryClient.invalidateQueries({ queryKey: ["employee"] });
+
+      Alert.alert("Успешно", "Сотрудник удален");
+    },
+    onError: (error) => {
+      console.error("Ошибка удаления:", error);
+      Alert.alert(
+        "Ошибка",
+        error.response?.data?.message || "Не удалось удалить сотрудника",
+      );
+    },
   });
 };
 

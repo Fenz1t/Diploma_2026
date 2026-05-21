@@ -73,7 +73,6 @@ const PositionsScreen = ({ navigation }) => {
       positionName: position.name,
     });
   };
-
   const handleViewEmployees = (position) => {
     navigation.navigate("PositionEmployees", {
       positionId: position.id,

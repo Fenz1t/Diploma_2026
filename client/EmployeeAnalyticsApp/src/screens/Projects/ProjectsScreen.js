@@ -18,11 +18,16 @@ import {
   Divider,
   Button,
 } from "react-native-paper";
+import * as DocumentPicker from "expo-document-picker";
 import {
   useProjects,
   useDeleteProject,
   useProjectStatistics,
 } from "../../hooks/api/useProjects";
+import {
+  useImportKanban,
+  useValidateKanbanImport,
+} from "../../hooks/api/useImport";
 import ProjectCard from "../../components/common/ProjectCard";
 import {
   PROJECT_STATUSES,
@@ -40,6 +45,9 @@ const ProjectsScreen = ({ navigation }) => {
   const [previousData, setPreviousData] = useState(null);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
 
+  const importMutation = useImportKanban();
+  const validateMutation = useValidateKanbanImport();
+
   function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -52,7 +60,6 @@ const ProjectsScreen = ({ navigation }) => {
     };
   }
 
-  // Дебаунс для поиска (задержка 300мс)
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const debouncedSetSearch = useCallback(
     debounce((query) => {
@@ -61,13 +68,11 @@ const ProjectsScreen = ({ navigation }) => {
     [],
   );
 
-  // Обработчик изменения поиска
   const handleSearchChange = (query) => {
     setSearchQuery(query);
     debouncedSetSearch(query);
   };
 
-  // Получаем данные
   const {
     data: apiResponse,
     isLoading,
@@ -76,13 +81,9 @@ const ProjectsScreen = ({ navigation }) => {
     isFetching,
   } = useProjects();
 
-  // Получаем статистику
   const { data: statistics } = useProjectStatistics();
-
-  // Мутация для удаления
   const deleteMutation = useDeleteProject();
 
-  // Сохраняем предыдущие данные
   useEffect(() => {
     if (apiResponse?.data?.projects) {
       setPreviousData(apiResponse.data.projects);
@@ -92,36 +93,27 @@ const ProjectsScreen = ({ navigation }) => {
     }
   }, [apiResponse, isFirstLoad]);
 
-  // Используем либо текущие данные, либо предыдущие
   const displayData =
     isLoading && !previousData
       ? []
       : apiResponse?.data?.projects || previousData || [];
 
-  // Локальный поиск и фильтрация по статусу
   const filteredProjects = displayData.filter((project) => {
-    // Фильтр по поиску
     const matchesSearch = project.name
       .toLowerCase()
       .includes(debouncedSearchQuery.toLowerCase());
 
-    // Фильтр по статусу
     const matchesStatus = !statusFilter || project.status === statusFilter;
 
     return matchesSearch && matchesStatus;
   });
 
-  // Извлекаем пагинацию
-  const pagination = apiResponse?.data?.pagination;
-
-  // Обновление списка
   const onRefresh = async () => {
     setRefreshing(true);
     await refetch();
     setRefreshing(false);
   };
 
-  // Удаление проекта
   const handleDelete = (id) => {
     Alert.alert(
       "Удаление проекта",
@@ -146,7 +138,6 @@ const ProjectsScreen = ({ navigation }) => {
     );
   };
 
-  // Редактирование
   const handleEdit = (project) => {
     navigation.navigate("ProjectForm", {
       projectId: project.id,
@@ -154,23 +145,66 @@ const ProjectsScreen = ({ navigation }) => {
     });
   };
 
-  // Просмотр деталей
   const handleViewDetails = (project) => {
     navigation.navigate("ProjectDetailsScreen", { projectId: project.id });
   };
 
-  // Создание нового проекта
   const handleCreate = () => {
     navigation.navigate("ProjectForm");
   };
 
-  // Очистка фильтра
   const clearFilter = () => {
     setStatusFilter("");
     setFilterMenuVisible(false);
   };
 
-  // Статистика проектов
+  const handleImportPress = async () => {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+          "text/csv",
+          "application/json",
+        ],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (picked.canceled) {
+        return;
+      }
+
+      const fileAsset = picked.assets?.[0];
+      if (!fileAsset) {
+        setSnackbarMessage("❌ Файл не выбран");
+        setSnackbarVisible(true);
+        return;
+      }
+
+      // Проверка файла перед импортом
+      await validateMutation.mutateAsync(fileAsset);
+
+      // Импорт
+      const result = await importMutation.mutateAsync(fileAsset);
+
+      const importedCount =
+        result?.data?.data?.workload_entries?.created ||
+        result?.data?.workload_entries?.created ||
+        0;
+
+      setSnackbarMessage(
+        `✅ Импорт завершен${importedCount ? `, добавлено: ${importedCount}` : ""}`,
+      );
+      setSnackbarVisible(true);
+
+      await refetch();
+    } catch (e) {
+      setSnackbarMessage(`❌ Ошибка импорта: ${e?.message || "неизвестно"}`);
+      setSnackbarVisible(true);
+    }
+  };
+
   const renderStatistics = () => {
     if (!statistics?.data) return null;
 
@@ -203,7 +237,6 @@ const ProjectsScreen = ({ navigation }) => {
     );
   };
 
-  // Первая загрузка
   if (isFirstLoad && isLoading) {
     return (
       <View style={styles.center}>
@@ -213,7 +246,6 @@ const ProjectsScreen = ({ navigation }) => {
     );
   }
 
-  // Ошибка
   if (error && !previousData) {
     return (
       <View style={styles.center}>
@@ -236,6 +268,7 @@ const ProjectsScreen = ({ navigation }) => {
       <Appbar.Header>
         <Appbar.BackAction onPress={() => navigation.goBack()} />
         <Appbar.Content title="Проекты" />
+        <Appbar.Action icon="database-import" color="#09ff00" onPress={handleImportPress} />
         <Appbar.Action icon="refresh" onPress={onRefresh} />
 
         <Menu
@@ -283,11 +316,16 @@ const ProjectsScreen = ({ navigation }) => {
         style={styles.searchbar}
       />
 
-      {/* Индикатор загрузки при обновлении */}
-      {isFetching && !isFirstLoad && (
+      {(isFetching ||
+        importMutation.isPending ||
+        validateMutation.isPending) && (
         <View style={styles.fetchingIndicator}>
           <ActivityIndicator size="small" color="#2196F3" />
-          <Text style={styles.fetchingText}>Обновление...</Text>
+          <Text style={styles.fetchingText}>
+            {importMutation.isPending || validateMutation.isPending
+              ? "Импорт данных..."
+              : "Обновление..."}
+          </Text>
         </View>
       )}
 
@@ -344,7 +382,7 @@ const ProjectsScreen = ({ navigation }) => {
       <Snackbar
         visible={snackbarVisible}
         onDismiss={() => setSnackbarVisible(false)}
-        duration={3000}
+        duration={3500}
         style={styles.snackbar}
       >
         {snackbarMessage}

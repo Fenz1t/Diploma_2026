@@ -1,13 +1,17 @@
 import React, { useMemo, useState } from "react";
-import { View, FlatList, StyleSheet } from "react-native";
+import { View, FlatList, StyleSheet, Alert } from "react-native";
 import {
   Appbar,
   Searchbar,
   ActivityIndicator,
   Text,
   Switch,
+  Dialog,
+  Button,
+  Portal,
 } from "react-native-paper";
 import { useEmployeesByDepartment } from "../../hooks/api/useEmployees";
+import { useDeleteEmployee } from "../../hooks/api/useEmployees"; // Добавить импорт
 import EmployeeCard from "../../components/common/EmployeeCard";
 
 const DepartmentEmployeesScreen = ({ route, navigation }) => {
@@ -15,6 +19,10 @@ const DepartmentEmployeesScreen = ({ route, navigation }) => {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [includeChildren, setIncludeChildren] = useState(false);
+
+  // Состояния для диалога подтверждения удаления
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
+  const [employeeToDelete, setEmployeeToDelete] = useState(null);
 
   const {
     data: employees = [],
@@ -24,17 +32,49 @@ const DepartmentEmployeesScreen = ({ route, navigation }) => {
     isFetching,
   } = useEmployeesByDepartment(departmentId, includeChildren);
 
+  // Добавить хук удаления
+  const deleteEmployeeMutation = useDeleteEmployee();
+
   const filtered = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     if (!q) return employees;
     return employees.filter((e) => e.full_name.toLowerCase().includes(q));
   }, [employees, searchQuery]);
 
+  // Функция для открытия диалога подтверждения
+  const handleDeletePress = (employee) => {
+    setEmployeeToDelete(employee);
+    setDeleteDialogVisible(true);
+  };
+
+  // Функция подтверждения удаления
+  const confirmDelete = () => {
+    if (employeeToDelete) {
+      deleteEmployeeMutation.mutate(employeeToDelete.id);
+    }
+    setDeleteDialogVisible(false);
+    setEmployeeToDelete(null);
+  };
+
+  // Функция отмены удаления
+  const cancelDelete = () => {
+    setDeleteDialogVisible(false);
+    setEmployeeToDelete(null);
+  };
+
   return (
     <View style={styles.container}>
       <Appbar.Header>
         <Appbar.BackAction onPress={navigation.goBack} />
         <Appbar.Content title={departmentName} />
+        <Appbar.Action
+          icon="account-plus"
+          onPress={() =>
+            navigation.navigate("EmployeeFormScreen", {
+              departmentId: departmentId,
+            })
+          }
+        />
         <Appbar.Action icon="refresh" onPress={refetch} />
       </Appbar.Header>
 
@@ -78,8 +118,10 @@ const DepartmentEmployeesScreen = ({ route, navigation }) => {
           renderItem={({ item }) => (
             <EmployeeCard
               employee={item}
-              onEdit={() => {}}
-              onDelete={() => {}}
+              onEdit={() => {
+                navigation.navigate("EmployeeDetails", { employeeId: item.id });
+              }}
+              onDelete={() => handleDeletePress(item)} // Обновить здесь
               onPress={() =>
                 navigation.navigate("EmployeeDetails", { employeeId: item.id })
               }
@@ -89,6 +131,32 @@ const DepartmentEmployeesScreen = ({ route, navigation }) => {
           contentContainerStyle={{ paddingBottom: 110, paddingTop: 6 }}
         />
       )}
+
+      {/* Диалог подтверждения удаления */}
+      <Portal>
+        <Dialog visible={deleteDialogVisible} onDismiss={cancelDelete}>
+          <Dialog.Title>Удаление сотрудника</Dialog.Title>
+          <Dialog.Content>
+            <Text variant="bodyMedium">
+              Вы уверены, что хотите удалить сотрудника{" "}
+              <Text style={{ fontWeight: "bold" }}>
+                {employeeToDelete?.full_name}
+              </Text>
+              ?
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={cancelDelete}>Отмена</Button>
+            <Button
+              onPress={confirmDelete}
+              loading={deleteEmployeeMutation.isPending}
+              textColor="red"
+            >
+              Удалить
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </View>
   );
 };

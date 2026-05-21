@@ -27,10 +27,9 @@ export default function ReportViewerScreen({ route }) {
         style={{ marginBottom: 16 }}
       />
 
-      {/* Одна таблица для всех отчетов! */}
       <ReportTable
         data={data}
-        reportType={type} // передаем тип для правильного отображения колонок
+        reportType={type} 
       />
 
       <ExportModal
