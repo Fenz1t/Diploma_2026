@@ -8,15 +8,22 @@ const validate = (validations) => {
     if (errors.isEmpty()) {
       return next();
     }
+
     const formattedErrors = errors.array().map((err) => ({
       field: err.param,
-      message: err.msg,
+      message: err.msg, // Здесь уже будет "Email уже используется"
       location: err.location,
     }));
 
+    // Берем первое сообщение об ошибке для общего message
+    const firstErrorMessage = formattedErrors[0]?.message || "Validation error";
+
+    // Либо можно собрать все ошибки в одну строку:
+    // const allErrors = formattedErrors.map(e => e.message).join(", ");
+
     res.status(400).json({
       success: false,
-      message: "Validation error",
+      message: firstErrorMessage, // Теперь будет конкретная ошибка
       errors: formattedErrors,
     });
   };
